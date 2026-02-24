@@ -79,7 +79,7 @@ jobs:
     name: Run Simulation Tests
     runs-on: ubuntu-latest
     needs: [testbench-syntax, compile-tests]
-    if: false  # TODO: remove when RTL is available in rtl/
+    #if: false  # TODO: remove when RTL is available in rtl/
 
     steps:
       - name: Checkout repository

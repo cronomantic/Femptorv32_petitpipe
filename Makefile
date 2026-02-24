@@ -51,11 +51,14 @@ DISASMS := $(patsubst %, $(BUILD_DIR)/disasm/%.dis, $(TESTS_NAME))
 
 SIM_EXE := $(BUILD_DIR)/sim/tb_top
 SIM_STUB_EXE := $(BUILD_DIR)/sim/tb_stub
+WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_wb
+
+# Test bench files
+TB_FILES  := $(TB_DIR)/tb_top.v $(TB_DIR)/mem_model.v
+WB_TB_FILES := $(TB_DIR)/tb_femtorv32_wb.v $(REPO_ROOT)validation/protocol_checkers.v
 
 # Real RTL files (empty if not yet committed)
 RTL_FILES := $(wildcard $(RTL_DIR)/*.v)
-
-TB_FILES  := $(TB_DIR)/tb_top.v $(TB_DIR)/mem_model.v
 
 # ---------------------------------------------------------------------------
 # Default target
@@ -121,6 +124,35 @@ $(SIM_EXE): $(TB_FILES) $(RTL_FILES)
 endif
 
 # ---------------------------------------------------------------------------
+# Build Wishbone test bench with real RTL
+# FemtoRV32_PetitPipe_WB is defined in femtorv32_petitpipe.v
+# ---------------------------------------------------------------------------
+ifeq ($(RTL_FILES),)
+$(WB_SIM_EXE):
+	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
+	@echo "       Add femtorv32_petitpipe.v (contains FemtoRV32_PetitPipe_WB) to rtl/"
+	@exit 1
+else
+$(WB_SIM_EXE): $(WB_TB_FILES) $(RTL_FILES)
+	@mkdir -p $(BUILD_DIR)/sim
+	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
+	    -o $@ $^
+endif
+
+# ---------------------------------------------------------------------------
+# Run Wishbone test bench
+# ---------------------------------------------------------------------------
+.PHONY: sim-wb
+sim-wb: $(WB_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_wb.log
+	@if grep -q "INSTRUCTION CACHE FUNCTIONAL" $(BUILD_DIR)/results/tb_femtorv32_wb.log; then \
+	    echo ""; echo "[TB PASS] Wishbone test bench with instruction cache passed"; \
+	else \
+	    echo ""; echo "[TB FAIL] Wishbone test bench with instruction cache failed"; exit 1; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Run a single test
 # ---------------------------------------------------------------------------
 $(BUILD_DIR)/results/%.log: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
@@ -182,6 +214,7 @@ help:
 	@echo "  tb-check         Verify testbench syntax with stub RTL (iverilog)"
 	@echo "  sim              Run all simulation tests (requires RTL in rtl/)"
 	@echo "  sim-<name>       Run a single test, e.g. sim-test_add"
+	@echo "  sim-wb           Run Wishbone test bench (pipelined cache prefetch test)"
 	@echo "  lint             Lint Verilog sources with Verilator"
 	@echo "  clean            Remove build artefacts"
 	@echo ""
