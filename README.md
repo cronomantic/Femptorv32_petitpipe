@@ -1,2 +1,3 @@
-# Femptorv32_petitpipe
+# Femptorv32 Petitpipe
+
 Small RISC-V processor with pipeline
