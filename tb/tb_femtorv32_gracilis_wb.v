@@ -1,11 +1,11 @@
 `timescale 1ns/1ps
 
-// Test FemtoRV32_Gracilis_WB: state-machine RV32IMC core with classic
-// Wishbone split buses (no instruction prefetch cache).
+// Test FemtoRV32_Gracilis_WB: state-machine RV32IMC core with a single
+// classic Wishbone bus (no instruction prefetch cache).
 //
 // Tests:
 //   - Sequential instruction fetch with variable Wishbone wait states
-//   - Store and load with correct write-back (verifies d_rdata bypass)
+//   - Store and load with correct write-back (verifies rdata bypass)
 //   - Interrupt handling (two IRQ lines, priority encoding, handler MRET)
 //   - Jump that redirects the fetch state machine
 
@@ -26,12 +26,11 @@ module tb_femtorv32_gracilis_wb;
 
    reg [31:0] mem [0:MEM_WORDS-1];
 
-   // Variable wait-state state for the instruction bus (simulates realistic
-   // Wishbone target latency)
-   localparam integer IWB_WAIT_MIN   = 0;
-   localparam integer IWB_WAIT_MAX   = 3;
-   localparam integer IWB_WAIT_RANGE = (IWB_WAIT_MAX - IWB_WAIT_MIN + 1);
-   integer iwb_wait_ctr;
+   // Variable wait-state counter for the Wishbone bus
+   localparam integer WB_WAIT_MIN   = 0;
+   localparam integer WB_WAIT_MAX   = 3;
+   localparam integer WB_WAIT_RANGE = (WB_WAIT_MAX - WB_WAIT_MIN + 1);
+   integer wb_wait_ctr;
    reg [7:0] lfsr;
 
    // -----------------------------------------------------------------------
@@ -137,10 +136,9 @@ module tb_femtorv32_gracilis_wb;
 
       $display("");
       $display("=== Bus Statistics ===");
-      $display("Instruction bus transactions: %0d", iwb_transaction_count);
-      $display("Data bus transactions:        %0d", dwb_transaction_count);
-      $display("Total cycles:                 %0d", cycle_count);
-      $display("Total instructions (EXECUTE): %0d", instr_count);
+      $display("Wishbone transactions: %0d", wb_transaction_count);
+      $display("Total cycles:          %0d", cycle_count);
+      $display("Total instructions:    %0d", instr_count);
 
       $display("");
       $display("✓✓✓ GRACILIS WB CORE FUNCTIONAL ✓✓✓");
@@ -184,7 +182,7 @@ module tb_femtorv32_gracilis_wb;
       if (reset_n) cycle_count <= cycle_count + 1;
    end
 
-   // LFSR for pseudo-random I-bus wait states
+   // LFSR for pseudo-random Wishbone wait states
    always @(posedge clk) begin
       if (!reset_n)
          lfsr <= 8'h1;
@@ -192,166 +190,105 @@ module tb_femtorv32_gracilis_wb;
          lfsr <= {lfsr[6:0], lfsr[7] ^ lfsr[5] ^ lfsr[4] ^ lfsr[3]};
    end
 
-   // Wishbone transaction counters
-   integer iwb_transaction_count;
-   integer dwb_transaction_count;
-   initial begin
-      iwb_transaction_count = 0;
-      dwb_transaction_count = 0;
-   end
-
+   // Wishbone transaction counter
+   integer wb_transaction_count;
+   initial wb_transaction_count = 0;
    always @(posedge clk) begin
-      if (reset_n) begin
-         if (iwb_cyc_o & iwb_stb_o & iwb_ack_i)
-            iwb_transaction_count <= iwb_transaction_count + 1;
-         if (dwb_cyc_o & dwb_stb_o & dwb_ack_i)
-            dwb_transaction_count <= dwb_transaction_count + 1;
-      end
+      if (reset_n & wb_cyc_o & wb_stb_o & wb_ack_i)
+         wb_transaction_count <= wb_transaction_count + 1;
    end
 
-   // Wishbone protocol checkers (both buses are classic)
-   wire proto_i_error;
-   wire proto_d_error;
-   wire [127:0] proto_i_msg;
-   wire [127:0] proto_d_msg;
+   // Wishbone protocol checker (classic bus)
+   wire proto_error;
+   wire [127:0] proto_msg;
 
-   wishbone_protocol_checker chk_i (
+   wishbone_protocol_checker chk (
       .clk      (clk),
       .rst      (!reset_n),
-      .cyc      (iwb_cyc_o),
-      .stb      (iwb_stb_o),
-      .we       (1'b0),
-      .ack      (iwb_ack_i),
-      .cti      (iwb_cti_o),
-      .sel      (iwb_sel_o),
-      .addr     (iwb_adr_o),
-      .data_i   (iwb_dat_i),
-      .data_o   (32'h0),
-      .bus_type (4'h1),      // classic (same as D-bus)
-      .protocol_error(proto_i_error),
-      .error_msg(proto_i_msg)
-   );
-
-   wishbone_protocol_checker chk_d (
-      .clk      (clk),
-      .rst      (!reset_n),
-      .cyc      (dwb_cyc_o),
-      .stb      (dwb_stb_o),
-      .we       (dwb_we_o),
-      .ack      (dwb_ack_i),
-      .cti      (dwb_cti_o),
-      .sel      (dwb_sel_o),
-      .addr     (dwb_adr_o),
-      .data_i   (dwb_dat_i),
-      .data_o   (dwb_dat_o),
-      .bus_type (4'h1),
-      .protocol_error(proto_d_error),
-      .error_msg(proto_d_msg)
+      .cyc      (wb_cyc_o),
+      .stb      (wb_stb_o),
+      .we       (wb_we_o),
+      .ack      (wb_ack_i),
+      .cti      (wb_cti_o),
+      .sel      (wb_sel_o),
+      .addr     (wb_adr_o),
+      .data_i   (wb_dat_i),
+      .data_o   (wb_dat_o),
+      .bus_type (4'h1),      // classic
+      .protocol_error(proto_error),
+      .error_msg(proto_msg)
    );
 
    always @(posedge clk) begin
-      if (proto_i_error) begin $error("I-BUS PROTOCOL ERROR: %s", proto_i_msg); $finish; end
-      if (proto_d_error) begin $error("D-BUS PROTOCOL ERROR: %s", proto_d_msg); $finish; end
+      if (proto_error) begin $error("WB PROTOCOL ERROR: %s", proto_msg); $finish; end
    end
 
    // -----------------------------------------------------------------------
    // DUT signals
    // -----------------------------------------------------------------------
-   wire [31:0] iwb_adr_o;
-   wire [31:0] iwb_dat_o;
-   wire  [3:0] iwb_sel_o;
-   wire        iwb_we_o;
-   wire        iwb_cyc_o;
-   wire        iwb_stb_o;
-   wire  [2:0] iwb_cti_o;
-   wire  [1:0] iwb_bte_o;
-   reg  [31:0] iwb_dat_i;
-   reg         iwb_ack_i;
-
-   wire [31:0] dwb_adr_o;
-   wire [31:0] dwb_dat_o;
-   wire  [3:0] dwb_sel_o;
-   wire        dwb_we_o;
-   wire        dwb_cyc_o;
-   wire        dwb_stb_o;
-   wire  [2:0] dwb_cti_o;
-   wire  [1:0] dwb_bte_o;
-   reg  [31:0] dwb_dat_i;
-   reg         dwb_ack_i;
+   wire [31:0] wb_adr_o;
+   wire [31:0] wb_dat_o;
+   wire  [3:0] wb_sel_o;
+   wire        wb_we_o;
+   wire        wb_cyc_o;
+   wire        wb_stb_o;
+   wire  [2:0] wb_cti_o;
+   wire  [1:0] wb_bte_o;
+   reg  [31:0] wb_dat_i;
+   reg         wb_ack_i;
 
    FemtoRV32_Gracilis_WB #(
       .RESET_ADDR(32'h00000000),
       .ADDR_WIDTH(ADDR_WIDTH)
    ) dut (
-      .clk       (clk),
-      .iwb_adr_o (iwb_adr_o),
-      .iwb_dat_o (iwb_dat_o),
-      .iwb_sel_o (iwb_sel_o),
-      .iwb_we_o  (iwb_we_o),
-      .iwb_cyc_o (iwb_cyc_o),
-      .iwb_stb_o (iwb_stb_o),
-      .iwb_cti_o (iwb_cti_o),
-      .iwb_bte_o (iwb_bte_o),
-      .iwb_dat_i (iwb_dat_i),
-      .iwb_ack_i (iwb_ack_i),
-      .dwb_adr_o (dwb_adr_o),
-      .dwb_dat_o (dwb_dat_o),
-      .dwb_sel_o (dwb_sel_o),
-      .dwb_we_o  (dwb_we_o),
-      .dwb_cyc_o (dwb_cyc_o),
-      .dwb_stb_o (dwb_stb_o),
-      .dwb_cti_o (dwb_cti_o),
-      .dwb_bte_o (dwb_bte_o),
-      .dwb_dat_i (dwb_dat_i),
-      .dwb_ack_i (dwb_ack_i),
-      .irq_i     (irq_lines),
-      .reset_n   (reset_n)
+      .clk      (clk),
+      .wb_adr_o (wb_adr_o),
+      .wb_dat_o (wb_dat_o),
+      .wb_sel_o (wb_sel_o),
+      .wb_we_o  (wb_we_o),
+      .wb_cyc_o (wb_cyc_o),
+      .wb_stb_o (wb_stb_o),
+      .wb_cti_o (wb_cti_o),
+      .wb_bte_o (wb_bte_o),
+      .wb_dat_i (wb_dat_i),
+      .wb_ack_i (wb_ack_i),
+      .irq_i    (irq_lines),
+      .reset_n  (reset_n)
    );
 
-   wire [7:0] i_index = iwb_adr_o[9:2];
-   wire [7:0] d_index = dwb_adr_o[9:2];
+   wire [7:0] wb_index = wb_adr_o[9:2];
 
    // -----------------------------------------------------------------------
-   // Memory model
-   //   I-bus: variable latency (0–3 wait states), simulates realistic targets
-   //   D-bus: zero wait states (immediate ack)
+   // Single memory model, variable wait states (0-3 cycles)
    // -----------------------------------------------------------------------
    always @(posedge clk) begin
       if (!reset_n) begin
-         iwb_ack_i   <= 1'b0;
-         dwb_ack_i   <= 1'b0;
-         iwb_dat_i   <= 32'b0;
-         dwb_dat_i   <= 32'b0;
-         iwb_wait_ctr <= 0;
+         wb_ack_i   <= 1'b0;
+         wb_dat_i   <= 32'b0;
+         wb_wait_ctr <= 0;
       end else begin
-         // Instruction bus: variable latency
-         if (iwb_cyc_o & iwb_stb_o) begin
-            if (iwb_wait_ctr == 0) begin
-               if (IWB_WAIT_RANGE <= 1)
-                  iwb_wait_ctr <= IWB_WAIT_MIN;
+         if (wb_cyc_o & wb_stb_o) begin
+            if (wb_wait_ctr == 0) begin
+               if (WB_WAIT_RANGE <= 1)
+                  wb_wait_ctr <= WB_WAIT_MIN;
                else
-                  iwb_wait_ctr <= IWB_WAIT_MIN + (lfsr % IWB_WAIT_RANGE);
+                  wb_wait_ctr <= WB_WAIT_MIN + (lfsr % WB_WAIT_RANGE);
             end else begin
-               iwb_wait_ctr <= iwb_wait_ctr - 1;
+               wb_wait_ctr <= wb_wait_ctr - 1;
             end
          end else begin
-            iwb_wait_ctr <= 0;
+            wb_wait_ctr <= 0;
          end
 
-         iwb_ack_i <= (iwb_cyc_o & iwb_stb_o) & (iwb_wait_ctr == 1 || iwb_wait_ctr == 0);
-         if (iwb_cyc_o & iwb_stb_o & (iwb_wait_ctr == 1 || iwb_wait_ctr == 0))
-            iwb_dat_i <= mem[i_index];
-
-         // Data bus: zero latency
-         dwb_ack_i <= dwb_cyc_o & dwb_stb_o;
-         if (dwb_cyc_o & dwb_stb_o) begin
-            if (dwb_we_o) begin
-               if (dwb_sel_o[0]) mem[d_index][ 7: 0] <= dwb_dat_o[ 7: 0];
-               if (dwb_sel_o[1]) mem[d_index][15: 8] <= dwb_dat_o[15: 8];
-               if (dwb_sel_o[2]) mem[d_index][23:16] <= dwb_dat_o[23:16];
-               if (dwb_sel_o[3]) mem[d_index][31:24] <= dwb_dat_o[31:24];
+         wb_ack_i <= (wb_cyc_o & wb_stb_o) & (wb_wait_ctr == 1 || wb_wait_ctr == 0);
+         if (wb_cyc_o & wb_stb_o & (wb_wait_ctr == 1 || wb_wait_ctr == 0)) begin
+            if (wb_we_o) begin
+               if (wb_sel_o[0]) mem[wb_index][ 7: 0] <= wb_dat_o[ 7: 0];
+               if (wb_sel_o[1]) mem[wb_index][15: 8] <= wb_dat_o[15: 8];
+               if (wb_sel_o[2]) mem[wb_index][23:16] <= wb_dat_o[23:16];
+               if (wb_sel_o[3]) mem[wb_index][31:24] <= wb_dat_o[31:24];
             end else begin
-               dwb_dat_i <= mem[d_index];
+               wb_dat_i <= mem[wb_index];
             end
          end
       end

@@ -5,8 +5,9 @@
 // (https://github.com/BrunoLevy/learn-fpga)
 //
 // Adaptations:
-//   - Split Wishbone instruction/data buses (classic protocol on both buses;
-//     gracilis has no prefetch cache — each word is fetched individually)
+//   - Single Wishbone master bus (classic protocol, shared instruction+data;
+//     gracilis has no prefetch cache — each word is fetched individually, and
+//     the state machine never issues instruction fetch and data access together)
 //   - 8 independent IRQ lines with priority encoder (irq_i[0] = highest)
 //   - Full 32-bit mcause register matching RISC-V privileged spec:
 //       bit 31 = interrupt flag, bits [3:0] = IRQ index
@@ -19,9 +20,8 @@
 //   ADDR_WIDTH: Internal address bus width (default 24 bits)
 //
 // Interfaces:
-//   Instruction bus (iwb_*): classic single-word read (no burst)
-//   Data bus (dwb_*):        classic single-transaction read/write
-//   irq_i[7:0]:              8 interrupt request lines
+//   wb_*:       single classic Wishbone master (instruction fetch + data r/w)
+//   irq_i[7:0]: 8 interrupt request lines
 //
 // Bruno Levy, Matthias Koch, 2020-2021 (original Gracilis)
 // Wishbone + 8-IRQ adaptation: see femtorv32_petitpipe.v
@@ -535,15 +535,22 @@ module FemtoRV32_Gracilis_Core (
 endmodule
 
 /******************************************************************************/
-// FemtoRV32_Gracilis_WB: dual classic-Wishbone wrapper for FemtoRV32_Gracilis_Core
+// FemtoRV32_Gracilis_WB: single classic-Wishbone wrapper for FemtoRV32_Gracilis_Core
 //
-// Both buses use classic (non-burst) Wishbone protocol (CTI = 3'b111).
-// There is no instruction prefetch cache; each word is fetched individually.
+// A single Wishbone master bus is shared between instruction fetches and data
+// accesses.  No arbitration logic is needed: the gracilis state machine never
+// issues an instruction fetch and a data access at the same time —
+//   FETCH_INSTR / WAIT_INSTR  →  only i_rstrb is asserted
+//   EXECUTE                   →  only d_rstrb or d_wmask are asserted
+//   WAIT_ALU_OR_MEM           →  only data (kept alive by pending register)
+// so the mux is purely combinational with no priority resolution required.
 //
-// Timing note: d_rdata and i_rdata bypass their holding registers when the
-// respective ack is high.  This ensures the core sees valid data on the same
-// clock edge that it transitions out of WAIT_INSTR / WAIT_ALU_OR_MEM,
-// matching the behaviour of the original single-bus gracilis memory model.
+// Classic Wishbone protocol (CTI = 3'b111, no burst).
+//
+// Timing note: rdata bypasses its holding register when wb_ack_i is high.
+// This ensures the core sees valid read data on the same clock edge that it
+// transitions out of WAIT_INSTR / WAIT_ALU_OR_MEM, preserving the original
+// gracilis unified-bus memory semantics.
 /******************************************************************************/
 
 module FemtoRV32_Gracilis_WB #(
@@ -552,29 +559,17 @@ module FemtoRV32_Gracilis_WB #(
 )(
    input          clk,
 
-   // Instruction wishbone (classic single-word read, no burst)
-   output [31:0]  iwb_adr_o,
-   output [31:0]  iwb_dat_o,
-   output  [3:0]  iwb_sel_o,
-   output         iwb_we_o,
-   output         iwb_cyc_o,
-   output         iwb_stb_o,
-   output  [2:0]  iwb_cti_o,
-   output  [1:0]  iwb_bte_o,
-   input  [31:0]  iwb_dat_i,
-   input          iwb_ack_i,
-
-   // Data wishbone (classic read/write)
-   output [31:0]  dwb_adr_o,
-   output [31:0]  dwb_dat_o,
-   output  [3:0]  dwb_sel_o,
-   output         dwb_we_o,
-   output         dwb_cyc_o,
-   output         dwb_stb_o,
-   output  [2:0]  dwb_cti_o,
-   output  [1:0]  dwb_bte_o,
-   input  [31:0]  dwb_dat_i,
-   input          dwb_ack_i,
+   // Single Wishbone master bus (classic, shared instruction+data, no burst)
+   output [31:0]  wb_adr_o,
+   output [31:0]  wb_dat_o,
+   output  [3:0]  wb_sel_o,
+   output         wb_we_o,
+   output         wb_cyc_o,
+   output         wb_stb_o,
+   output  [2:0]  wb_cti_o,
+   output  [1:0]  wb_bte_o,
+   input  [31:0]  wb_dat_i,
+   input          wb_ack_i,
 
    input   [7:0]  irq_i,
 
@@ -615,87 +610,82 @@ module FemtoRV32_Gracilis_WB #(
    );
 
    // -------------------------------------------------------------------------
-   // Instruction Wishbone: classic single-word read (no burst)
+   // Data-side pending register
    //
-   // The bus is asserted while the core requests a fetch (i_rstrb).
-   // i_rbusy stays high until the ack arrives; the bypass ensures the
-   // core sees valid instruction data on the ack cycle.
+   // In EXECUTE the core asserts d_rstrb / d_wmask for one cycle then moves to
+   // WAIT_ALU_OR_MEM where those signals drop to zero.  The pending register
+   // keeps the transaction on the bus until wb_ack_i arrives.
    // -------------------------------------------------------------------------
 
-   reg [31:0] i_rdata_reg;
+   reg        d_pending;
+   reg        d_we_pending;
+   reg [31:0] d_adr_pending;
+   reg [31:0] d_dat_pending;
+   reg  [3:0] d_sel_pending;
 
-   assign iwb_adr_o = i_addr;
-   assign iwb_dat_o = 32'b0;
-   assign iwb_sel_o = 4'b1111;
-   assign iwb_we_o  = 1'b0;
-   assign iwb_cyc_o = i_rstrb;
-   assign iwb_stb_o = i_rstrb;
-   assign iwb_cti_o = 3'b111; // classic (end of cycle)
-   assign iwb_bte_o = 2'b00;
+   wire d_new_req = d_rstrb | (|d_wmask);
+   wire d_new_we  = |d_wmask;
+   wire [3:0] d_new_sel = d_new_we ? d_wmask : 4'b1111;
 
-   // Bypass: present live data when ack is high so the core can latch it
-   // in the same cycle it transitions out of WAIT_INSTR.
-   assign i_rdata = iwb_ack_i ? iwb_dat_i : i_rdata_reg;
-   assign i_rbusy = i_rstrb & ~iwb_ack_i;
+   wire d_active  = d_pending | d_new_req;
+   wire d_waiting = d_active & ~wb_ack_i;
+   wire d_we_comb = d_pending ? d_we_pending : d_new_we;
 
    // -------------------------------------------------------------------------
-   // Data Wishbone: classic single-transaction read/write
+   // Single-bus mux
    //
-   // A pending register holds the transaction while waiting for ack.
-   // d_rdata bypasses the holding register when ack is high so that
-   // LOAD_data is correct on the transition out of WAIT_ALU_OR_MEM.
+   // i_rstrb and d_active are mutually exclusive (guaranteed by the gracilis
+   // state machine), so this is a simple non-conflicting mux.
    // -------------------------------------------------------------------------
 
-   reg [31:0] d_rdata_reg;
+   assign wb_cyc_o = i_rstrb | d_active;
+   assign wb_stb_o = i_rstrb | d_active;
+   assign wb_adr_o = i_rstrb ? i_addr                                      :
+                               (d_pending ? d_adr_pending : d_addr);
+   assign wb_dat_o = i_rstrb ? 32'b0                                       :
+                               (d_pending ? d_dat_pending : d_wdata);
+   assign wb_sel_o = i_rstrb ? 4'b1111                                     :
+                               (d_pending ? d_sel_pending : d_new_sel);
+   assign wb_we_o  = ~i_rstrb & d_we_comb;
+   assign wb_cti_o = 3'b111; // classic (end of cycle)
+   assign wb_bte_o = 2'b00;
 
-   reg        dwb_pending;
-   reg        dwb_we_pending;
-   reg [31:0] dwb_adr_pending;
-   reg [31:0] dwb_dat_pending;
-   reg  [3:0] dwb_sel_pending;
+   // -------------------------------------------------------------------------
+   // Read-data bypass
+   //
+   // wb_dat_i is routed to both i_rdata and d_rdata via a bypass that presents
+   // the live bus value when wb_ack_i is high.  Since instruction fetch and
+   // data access are mutually exclusive only one bypass path is active at a
+   // time.
+   // -------------------------------------------------------------------------
 
-   wire dwb_new_req = d_rstrb | (|d_wmask);
-   wire dwb_new_we  = |d_wmask;
-   wire [3:0] dwb_new_sel = dwb_new_we ? d_wmask : 4'b1111;
+   reg [31:0] rdata_reg;
 
-   wire dwb_active  = dwb_pending | dwb_new_req;
-   wire dwb_waiting = dwb_active & ~dwb_ack_i;
-   wire dwb_we_comb = dwb_pending ? dwb_we_pending : dwb_new_we;
+   assign i_rdata = wb_ack_i ? wb_dat_i : rdata_reg;
+   assign i_rbusy = i_rstrb & ~wb_ack_i;
 
-   assign dwb_adr_o = dwb_pending ? dwb_adr_pending : d_addr;
-   assign dwb_dat_o = dwb_pending ? dwb_dat_pending : d_wdata;
-   assign dwb_sel_o = dwb_pending ? dwb_sel_pending : dwb_new_sel;
-   assign dwb_we_o  = dwb_we_comb;
-   assign dwb_cyc_o = dwb_active;
-   assign dwb_stb_o = dwb_active;
-   assign dwb_cti_o = 3'b111; // classic (end of cycle)
-   assign dwb_bte_o = 2'b00;
-
-   // Bypass: d_rdata is valid when ack is high, so WAIT_ALU_OR_MEM write-back
-   // sees the correct loaded value on the same edge it transitions.
-   assign d_rdata = dwb_ack_i ? dwb_dat_i : d_rdata_reg;
-   assign d_rbusy = dwb_waiting & ~dwb_we_comb;
-   assign d_wbusy = dwb_waiting &  dwb_we_comb;
+   assign d_rdata = wb_ack_i ? wb_dat_i : rdata_reg;
+   assign d_rbusy = d_waiting & ~d_we_comb;
+   assign d_wbusy = d_waiting &  d_we_comb;
 
    always @(posedge clk) begin
       if (!reset_n) begin
-         dwb_pending <= 1'b0;
+         d_pending <= 1'b0;
       end else begin
-         if (!dwb_pending) begin
-            if (dwb_new_req) begin
-               dwb_pending     <= ~dwb_ack_i;
-               dwb_we_pending  <= dwb_new_we;
-               dwb_adr_pending <= d_addr;
-               dwb_dat_pending <= d_wdata;
-               dwb_sel_pending <= dwb_new_sel;
+         if (!d_pending) begin
+            if (d_new_req) begin
+               d_pending     <= ~wb_ack_i;
+               d_we_pending  <= d_new_we;
+               d_adr_pending <= d_addr;
+               d_dat_pending <= d_wdata;
+               d_sel_pending <= d_new_sel;
             end
-         end else if (dwb_ack_i) begin
-            dwb_pending <= 1'b0;
+         end else if (wb_ack_i) begin
+            d_pending <= 1'b0;
          end
       end
 
-      if (iwb_ack_i) i_rdata_reg <= iwb_dat_i;
-      if (dwb_ack_i) d_rdata_reg <= dwb_dat_i;
+      if (wb_ack_i) rdata_reg <= wb_dat_i;
    end
 
 endmodule

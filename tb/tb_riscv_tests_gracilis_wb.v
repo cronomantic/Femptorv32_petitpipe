@@ -25,55 +25,34 @@ module tb_riscv_tests_gracilis_wb;
    integer max_cycles;
    integer cycle_count;
 
-   wire [31:0] iwb_adr_o;
-   wire [31:0] iwb_dat_o;
-   wire  [3:0] iwb_sel_o;
-   wire        iwb_we_o;
-   wire        iwb_cyc_o;
-   wire        iwb_stb_o;
-   wire  [2:0] iwb_cti_o;
-   wire  [1:0] iwb_bte_o;
-   reg  [31:0] iwb_dat_i;
-   reg         iwb_ack_i;
-
-   wire [31:0] dwb_adr_o;
-   wire [31:0] dwb_dat_o;
-   wire  [3:0] dwb_sel_o;
-   wire        dwb_we_o;
-   wire        dwb_cyc_o;
-   wire        dwb_stb_o;
-   wire  [2:0] dwb_cti_o;
-   wire  [1:0] dwb_bte_o;
-   reg  [31:0] dwb_dat_i;
-   reg         dwb_ack_i;
+   wire [31:0] wb_adr_o;
+   wire [31:0] wb_dat_o;
+   wire  [3:0] wb_sel_o;
+   wire        wb_we_o;
+   wire        wb_cyc_o;
+   wire        wb_stb_o;
+   wire  [2:0] wb_cti_o;
+   wire  [1:0] wb_bte_o;
+   reg  [31:0] wb_dat_i;
+   reg         wb_ack_i;
 
    FemtoRV32_Gracilis_WB #(
       .RESET_ADDR(32'h00000000),
       .ADDR_WIDTH(ADDR_WIDTH)
    ) dut (
-      .clk       (clk),
-      .iwb_adr_o (iwb_adr_o),
-      .iwb_dat_o (iwb_dat_o),
-      .iwb_sel_o (iwb_sel_o),
-      .iwb_we_o  (iwb_we_o),
-      .iwb_cyc_o (iwb_cyc_o),
-      .iwb_stb_o (iwb_stb_o),
-      .iwb_cti_o (iwb_cti_o),
-      .iwb_bte_o (iwb_bte_o),
-      .iwb_dat_i (iwb_dat_i),
-      .iwb_ack_i (iwb_ack_i),
-      .dwb_adr_o (dwb_adr_o),
-      .dwb_dat_o (dwb_dat_o),
-      .dwb_sel_o (dwb_sel_o),
-      .dwb_we_o  (dwb_we_o),
-      .dwb_cyc_o (dwb_cyc_o),
-      .dwb_stb_o (dwb_stb_o),
-      .dwb_cti_o (dwb_cti_o),
-      .dwb_bte_o (dwb_bte_o),
-      .dwb_dat_i (dwb_dat_i),
-      .dwb_ack_i (dwb_ack_i),
-      .irq_i     (irq_lines),
-      .reset_n   (reset_n)
+      .clk      (clk),
+      .wb_adr_o (wb_adr_o),
+      .wb_dat_o (wb_dat_o),
+      .wb_sel_o (wb_sel_o),
+      .wb_we_o  (wb_we_o),
+      .wb_cyc_o (wb_cyc_o),
+      .wb_stb_o (wb_stb_o),
+      .wb_cti_o (wb_cti_o),
+      .wb_bte_o (wb_bte_o),
+      .wb_dat_i (wb_dat_i),
+      .wb_ack_i (wb_ack_i),
+      .irq_i    (irq_lines),
+      .reset_n  (reset_n)
    );
 
    initial begin
@@ -142,52 +121,40 @@ module tb_riscv_tests_gracilis_wb;
       end
    endtask
 
-   wire [31:0] i_index = iwb_adr_o[31:2];
-   wire [31:0] d_index = dwb_adr_o[31:2];
+   wire [31:0] wb_index = wb_adr_o[31:2];
 
    always @(posedge clk) begin
       if (!reset_n) begin
-         iwb_ack_i <= 1'b0;
-         dwb_ack_i <= 1'b0;
-         iwb_dat_i <= 32'b0;
-         dwb_dat_i <= 32'b0;
+         wb_ack_i <= 1'b0;
+         wb_dat_i <= 32'b0;
       end else begin
-         // Instruction Wishbone: classic, zero wait states
-         iwb_ack_i <= iwb_cyc_o & iwb_stb_o;
-         if (iwb_cyc_o & iwb_stb_o) begin
-            if (i_index < MEM_WORDS)
-               iwb_dat_i <= mem[i_index];
-            else
-               iwb_dat_i <= 32'h00000013; // NOP
-         end
-
-         // Data Wishbone: classic, zero wait states
-         dwb_ack_i <= dwb_cyc_o & dwb_stb_o;
-         if (dwb_cyc_o & dwb_stb_o) begin
-            if (dwb_we_o) begin
-               if (dwb_adr_o == TOHOST_ADDR) begin
-                  $display("[TB] tohost write: 0x%08x", dwb_dat_o);
+         // Single Wishbone bus: classic, zero wait states
+         wb_ack_i <= wb_cyc_o & wb_stb_o;
+         if (wb_cyc_o & wb_stb_o) begin
+            if (wb_we_o) begin
+               if (wb_adr_o == TOHOST_ADDR) begin
+                  $display("[TB] tohost write: 0x%08x", wb_dat_o);
                   dump_signature();
-                  if (dwb_dat_o == 32'h00000001) begin
+                  if (wb_dat_o == 32'h00000001) begin
                      $display("[TB PASS] riscv-tests tohost signaled pass");
                      $finish(0);
                   end else begin
-                     $display("[TB FAIL] riscv-tests tohost signaled fail: 0x%08x", dwb_dat_o);
+                     $display("[TB FAIL] riscv-tests tohost signaled fail: 0x%08x", wb_dat_o);
                      $finish(1);
                   end
-               end else if (dwb_adr_o == FROMHOST_ADDR) begin
+               end else if (wb_adr_o == FROMHOST_ADDR) begin
                   // Ignore fromhost writes
-               end else if (d_index < MEM_WORDS) begin
-                  if (dwb_sel_o[0]) mem[d_index][ 7: 0] <= dwb_dat_o[ 7: 0];
-                  if (dwb_sel_o[1]) mem[d_index][15: 8] <= dwb_dat_o[15: 8];
-                  if (dwb_sel_o[2]) mem[d_index][23:16] <= dwb_dat_o[23:16];
-                  if (dwb_sel_o[3]) mem[d_index][31:24] <= dwb_dat_o[31:24];
+               end else if (wb_index < MEM_WORDS) begin
+                  if (wb_sel_o[0]) mem[wb_index][ 7: 0] <= wb_dat_o[ 7: 0];
+                  if (wb_sel_o[1]) mem[wb_index][15: 8] <= wb_dat_o[15: 8];
+                  if (wb_sel_o[2]) mem[wb_index][23:16] <= wb_dat_o[23:16];
+                  if (wb_sel_o[3]) mem[wb_index][31:24] <= wb_dat_o[31:24];
                end
             end else begin
-               if (d_index < MEM_WORDS)
-                  dwb_dat_i <= mem[d_index];
+               if (wb_index < MEM_WORDS)
+                  wb_dat_i <= mem[wb_index];
                else
-                  dwb_dat_i <= 32'h00000000;
+                  wb_dat_i <= 32'h00000013; // NOP
             end
          end
       end
