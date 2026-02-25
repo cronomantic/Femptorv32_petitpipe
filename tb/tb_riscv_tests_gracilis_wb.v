@@ -8,8 +8,7 @@
 
 module tb_riscv_tests_gracilis_wb;
    localparam MEM_WORDS      = 262144; // 1 MB (word-addressed)
-   localparam [31:0] TOHOST_ADDR   = 32'h00001000;
-   localparam [31:0] FROMHOST_ADDR = 32'h00001008;
+   localparam [31:0] EXIT_ADDR     = 32'h10000000; // matches test_macros.h EXIT_ADDR
 
    reg clk;
    reg reset_n;
@@ -130,18 +129,15 @@ module tb_riscv_tests_gracilis_wb;
          wb_ack_i <= wb_cyc_o & wb_stb_o;
          if (wb_cyc_o & wb_stb_o) begin
             if (wb_we_o) begin
-               if (wb_adr_o == TOHOST_ADDR) begin
-                  $display("[TB] tohost write: 0x%08x", wb_dat_o);
-                  dump_signature();
+               if (wb_adr_o == EXIT_ADDR) begin
                   if (wb_dat_o == 32'h00000001) begin
-                     $display("[TB PASS] riscv-tests tohost signaled pass");
+                     $display("[TB PASS] Test passed in %0d cycles.", cycle_count);
                      $finish(0);
                   end else begin
-                     $display("[TB FAIL] riscv-tests tohost signaled fail: 0x%08x", wb_dat_o);
+                     $display("[TB FAIL] Test failed with error code %0d after %0d cycles.",
+                              wb_dat_o, cycle_count);
                      $finish(1);
                   end
-               end else if (wb_adr_o == FROMHOST_ADDR) begin
-                  // Ignore fromhost writes
                end else if (wb_index < MEM_WORDS) begin
                   if (wb_sel_o[0]) mem[wb_index][ 7: 0] <= wb_dat_o[ 7: 0];
                   if (wb_sel_o[1]) mem[wb_index][15: 8] <= wb_dat_o[15: 8];

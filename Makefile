@@ -301,14 +301,19 @@ sim-%: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
 RESULTS := $(patsubst %, $(BUILD_DIR)/results/%.log, $(TESTS_NAME))
 
 .PHONY: sim
-sim: $(RESULTS)
+sim: $(RESULTS) $(GRACILIS_RESULTS)
 	@echo ""
 	@echo "==============================="
-	@echo " Simulation results summary"
+	@echo " PetitPipe simulation results"
 	@echo "==============================="
 	@grep -h "\[TB" $(RESULTS) || true
 	@echo ""
-	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(RESULTS) 2>/dev/null; then \
+	@echo "==============================="
+	@echo " Gracilis simulation results"
+	@echo "==============================="
+	@grep -h "\[TB" $(GRACILIS_RESULTS) || true
+	@echo ""
+	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(RESULTS) $(GRACILIS_RESULTS) 2>/dev/null; then \
 	    echo "RESULT: SOME TESTS FAILED"; exit 1; \
 	else \
 	    echo "RESULT: ALL TESTS PASSED"; \
