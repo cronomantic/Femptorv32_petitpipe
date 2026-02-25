@@ -54,12 +54,14 @@ SIM_STUB_EXE := $(BUILD_DIR)/sim/tb_stub
 WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_wb
 GRACILIS_WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_gracilis_wb
 GRACILIS_RISCV_SIM_EXE := $(BUILD_DIR)/sim/tb_riscv_tests_gracilis_wb
+PERF_SIM_EXE := $(BUILD_DIR)/sim/tb_perf_compare
 
 # Test bench files
 TB_FILES  := $(TB_DIR)/tb_top.v $(TB_DIR)/mem_model.v
 WB_TB_FILES := $(TB_DIR)/tb_femtorv32_wb.v $(REPO_ROOT)validation/protocol_checkers.v
 GRACILIS_WB_TB_FILES := $(TB_DIR)/tb_femtorv32_gracilis_wb.v $(REPO_ROOT)validation/protocol_checkers.v
 GRACILIS_RISCV_TB_FILES := $(TB_DIR)/tb_riscv_tests_gracilis_wb.v
+PERF_TB_FILES := $(TB_DIR)/tb_perf_compare.v
 
 # Real RTL files (empty if not yet committed)
 RTL_FILES := $(wildcard $(RTL_DIR)/*.v)
@@ -234,6 +236,53 @@ sim-gracilis: $(GRACILIS_RESULTS)
 	fi
 
 # ---------------------------------------------------------------------------
+# Build performance-comparison test bench (PetitPipe vs Gracilis)
+# ---------------------------------------------------------------------------
+ifeq ($(RTL_FILES),)
+$(PERF_SIM_EXE):
+	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
+	@exit 1
+else
+$(PERF_SIM_EXE): $(PERF_TB_FILES) $(RTL_FILES)
+	@mkdir -p $(BUILD_DIR)/sim
+	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
+	    -o $@ $^
+endif
+
+# ---------------------------------------------------------------------------
+# Run performance comparison for a single test
+#   make perf-compare-test_add
+# ---------------------------------------------------------------------------
+.PHONY: perf-compare-%
+perf-compare-%: $(BUILD_DIR)/hexes/%.hex $(PERF_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(PERF_SIM_EXE) +hex_file=$< +test_name=$* \
+	    | tee $(BUILD_DIR)/results/perf_$*.log
+
+# ---------------------------------------------------------------------------
+# Run performance comparison for ALL compiled tests
+# ---------------------------------------------------------------------------
+PERF_RESULTS := $(patsubst %, $(BUILD_DIR)/results/perf_%.log, $(TESTS_NAME))
+
+$(BUILD_DIR)/results/perf_%.log: $(BUILD_DIR)/hexes/%.hex $(PERF_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(PERF_SIM_EXE) +hex_file=$< +test_name=$* | tee $@
+
+.PHONY: perf-compare
+perf-compare: compile $(PERF_RESULTS)
+	@echo ""
+	@echo "================================================================"
+	@echo " Performance comparison summary (PetitPipe vs Gracilis)"
+	@echo "================================================================"
+	@grep -h "Gracilis / PetitPipe\|PERF" $(PERF_RESULTS) 2>/dev/null || true
+	@echo ""
+	@if grep -q "\[PERF FAIL\]" $(PERF_RESULTS) 2>/dev/null; then \
+	    echo "RESULT: SOME TESTS FAILED"; exit 1; \
+	else \
+	    echo "RESULT: ALL TESTS PASSED"; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Run a single test
 # ---------------------------------------------------------------------------
 $(BUILD_DIR)/results/%.log: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
@@ -299,6 +348,8 @@ help:
 	@echo "  sim-gracilis-wb  Run Gracilis Wishbone test bench (state-machine core)"
 	@echo "  sim-gracilis     Run all riscv-tests on FemtoRV32_Gracilis_WB"
 	@echo "  sim-gracilis-<n> Run a single riscv-test on Gracilis, e.g. sim-gracilis-test_add"
+	@echo "  perf-compare     Run all tests on both cores, print cycle-count comparison"
+	@echo "  perf-compare-<n> Run a single test comparison, e.g. perf-compare-test_add"
 	@echo "  lint             Lint Verilog sources with Verilator"
 	@echo "  clean            Remove build artefacts"
 	@echo ""

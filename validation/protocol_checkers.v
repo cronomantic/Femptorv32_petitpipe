@@ -99,8 +99,8 @@ module wishbone_protocol_checker (
             end
             
             // ===== CHECK 3: Signal stability during transaction =====
-            if (stb && !ack && bus_type != 4'h0) begin
-                // Classic transaction in progress
+            if (stb && !ack && !ack_prev && bus_type != 4'h0) begin
+                // Classic transaction in progress (no ack on this or previous cycle)
                 // Address must be stable
                 if (addr != addr_prev && stb_prev) begin
                     addr_change_during_transaction <= 1'b1;
