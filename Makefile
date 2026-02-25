@@ -86,7 +86,7 @@ $(BUILD_DIR)/elfs/%.elf: $(TEST_DIR)/rv32i/%.S $(LINK_SCRIPT) $(COMMON_DIR)/test
 # ---------------------------------------------------------------------------
 $(BUILD_DIR)/hexes/%.hex: $(BUILD_DIR)/elfs/%.elf
 	@mkdir -p $(BUILD_DIR)/hexes
-	$(OBJCOPY) -O verilog $< $@
+	$(OBJCOPY) -O verilog --verilog-data-width 4 $< $@
 
 # ---------------------------------------------------------------------------
 # ELF → disassembly (optional but useful for debugging)

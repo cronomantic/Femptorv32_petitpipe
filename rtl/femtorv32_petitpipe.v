@@ -410,7 +410,7 @@ module FemtoRV32_Core_P2(
 
    wire writeBack_en = ex_fire & ~(isBranch | isStore);
 
-   wire ex_flush = ex_fire & (interrupt | isJAL | (isBranch & predicate) | interrupt_return);
+   wire ex_flush = ex_fire & (interrupt | isJAL | isJALR | (isBranch & predicate) | interrupt_return);
 
    always @(posedge clk) begin
       if (!reset_n) begin
@@ -607,7 +607,7 @@ module FemtoRV32_PetitPipe_WB #(
    reg [31:0] d_rdata_reg;
 
    assign i_rdata = (i_rstrb & instr_hit) ? iwb_buf[instr_word_idx] : i_rdata_reg;
-   assign d_rdata = d_rdata_reg;
+   assign d_rdata = dwb_ack_i ? dwb_dat_i : d_rdata_reg;
 
    // Instruction wishbone (pipelined, read-only)
    localparam integer IWB_BURST_BITS = (IWB_BURST_LEN <= 1) ? 1 : $clog2(IWB_BURST_LEN);

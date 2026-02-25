@@ -20,11 +20,12 @@ _start:
 
     /* Test 2 & 3: JAL jumps and stores PC+4 in rd */
     jal     ra, jal_target
+jal_after:                      /* ra must equal this address (PC+4 of jal) */
     TEST_FAIL(2)            /* should not be reached */
 
 jal_return:
-    /* Test 3: ra must hold the address of the instruction after JAL */
-    la      t0, jal_return
+    /* Test 3: ra must hold the address of the instruction after JAL (jal_after) */
+    la      t0, jal_after
     CHECK_EQ_REG(ra, t0, 3)
 
     /* ---- JALR ---- */
@@ -32,11 +33,12 @@ jal_return:
     /* Test 4 & 5: JALR jumps to rs1+offset and stores PC+4 in rd */
     la      t0, jalr_target
     jalr    ra, t0, 0
+jalr_after:                     /* ra must equal this address (PC+4 of jalr) */
     TEST_FAIL(4)            /* should not be reached */
 
 jalr_return:
-    /* Test 5: ra holds the address of the instruction after JALR */
-    la      t0, jalr_return
+    /* Test 5: ra holds the address of the instruction after JALR (jalr_after) */
+    la      t0, jalr_after
     CHECK_EQ_REG(ra, t0, 5)
 
     /* Test 6: JALR forces bit 0 of target to 0 (RISC-V spec §2.5).
