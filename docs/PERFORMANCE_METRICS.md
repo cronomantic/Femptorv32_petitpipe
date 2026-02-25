@@ -333,3 +333,47 @@ Assessment: Load-use stalls dominating, cache adequate
    - Define acceptable IPC range for your workload
    - Establish cache hit rate minimum
    - Monitor in continuous integration
+
+---
+
+## Cross-Core Performance Comparison
+
+A dedicated testbench `tb/tb_perf_compare.v` runs the same hex program on both
+`FemtoRV32_PetitPipe_WB` and `FemtoRV32_Gracilis_WB` simultaneously and reports
+the cycle count for each.
+
+```
+make perf-compare-<test>
+# or
+vvp build/sim/tb_perf_compare +hex_file=<path> +test_name=<name>
+```
+
+### Example results (3-instruction ALU loop, zero-wait-state Wishbone)
+
+| Loop iters | PetitPipe cycles | Gracilis cycles | PP speedup |
+|:----------:|:----------------:|:---------------:|:----------:|
+|          1 |               19 |              20 |     1.05x  |
+|          5 |               47 |              56 |     1.19x  |
+|         10 |               82 |             101 |     1.23x  |
+|         50 |              362 |             461 |     1.27x  |
+|        100 |              712 |             911 |     1.28x  |
+
+PetitPipe's 4-word burst I-cache eliminates most refetch overhead once the loop
+body fits within a single cache line.  Gracilis fetches every instruction
+individually (no cache) so its cycle count scales linearly with iteration count.
+
+### Architectural note
+
+- **PetitPipe**: 2-stage pipeline, dual Wishbone buses (I-bus pipelined burst,
+  D-bus classic), 4-word instruction prefetch cache.
+- **Gracilis**: 4-state machine (FETCH\_INSTR → WAIT\_INSTR → EXECUTE →
+  WAIT\_ALU\_OR\_MEM), single shared classic Wishbone bus, no instruction cache.
+
+### I-bus testbench timing note
+
+For correct burst simulation the PetitPipe I-bus slave must provide **combinatorial
+read data** (wire, not registered) together with a 1-cycle registered ack.  If
+data is registered from the same edge as the ack, the burst wrapper's buffer
+index has already advanced, causing each word to land in the wrong cache slot.
+`tb_perf_compare.v` uses a combinatorial `assign` for `pp_iwb_dat_i`.
+

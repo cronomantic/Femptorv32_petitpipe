@@ -7,7 +7,7 @@ FemtoRV32 PetitPipe has **3 Verilog parameters** for compile-time configuration:
 | Parameter | Type | Default | Range | Purpose |
 |-----------|------|---------|-------|---------|
 | `RESET_ADDR` | 32-bit | `32'h00000000` | Any 32-bit address | Initial program counter on reset |
-| `ADDR_WIDTH` | Integer | `24` | 12-30+ bits | Memory address bus width (word-addressed) |
+| ~~`ADDR_WIDTH[removed]`~~ | removed | — | — | Address bus is always 32-bit (full RISC-V range). Parameter removed. |
 | `IWB_BURST_LEN` | Integer | `4` | 1-16 words | Instruction cache line size (prefetch) |
 
 **ISA Support** (compile-time, not Verilog parameters):
@@ -39,9 +39,9 @@ parameter IWB_BURST_LEN = 4;  // 4-word cache lines
 
 ---
 
-#### `ADDR_WIDTH` (Memory Address Range)
+#### `ADDR_WIDTH[removed]` (Memory Address Range)
 ```verilog
-parameter ADDR_WIDTH = 24;  // 24-bit word addressing → 16 MB address space
+parameter ADDR_WIDTH[removed] = 24;  // 24-bit word addressing → 16 MB address space
 ```
 **Impact**:
 - 24-bit word addressing → 2²⁴ words = 16 million words = 16 MB physical address space
@@ -59,16 +59,16 @@ parameter ADDR_WIDTH = 24;  // 24-bit word addressing → 16 MB address space
 **Example - Configure for Different Sizes**:
 ```verilog
 // 64 KB address space (minimal)
-FemtoRV32_PetitPipe_WB #(.ADDR_WIDTH(16)) core_small (...)
+FemtoRV32_PetitPipe_WB #(.IWB_BURST_LEN(4)) core (...)  // ADDR_WIDTH[removed] removed: always 32-bit
 
 // 16 MB address space (default)
-FemtoRV32_PetitPipe_WB #(.ADDR_WIDTH(24)) core_default (...)
+
 
 // 256 MB address space (large)
-FemtoRV32_PetitPipe_WB #(.ADDR_WIDTH(28)) core_large (...)
+
 ```
 
-**Note**: Testbench memory controllers often use different ADDR_WIDTH for simulation (smaller = faster simulation):
+**Note**: Testbench memory controllers use word-indexed arrays; no ADDR_WIDTH[removed] override is needed.
 
 ---
 
@@ -80,7 +80,6 @@ These parameters are in the example memory controller, **NOT** in the core itsel
 ```verilog
 // In soc_dual_port_controller instantiation
 soc_dual_port_controller #(
-    .ADDR_WIDTH(16),        // Match core ADDR_WIDTH or smaller for sim
     .LATENCY(1)             // Cycles from STB to ACK
 ) mem_ctrl (...)
 ```
@@ -108,7 +107,7 @@ LATENCY=variable: IPC 0.50-0.70 (realistic systems)
 // In FemtoRV32_PetitPipe_WB
 output wire         iwb_cyc,              // Cycle active
 output wire         iwb_stb,              // Strobe (valid address + CTI)
-output wire [ADDR_WIDTH-1:2] iwb_adr,    // Word address (bits [ADDR_WIDTH-1:2])
+output wire [31:2]           iwb_adr,    // Word address (bits [31:2])
 output wire [2:0]   iwb_cti,              // Cycle Type Indicator
 input  wire         iwb_ack,              // Acknowledge (data valid)
 input  wire [31:0]  iwb_dat_i             // Read data
@@ -131,7 +130,7 @@ output wire         dwb_cyc,              // Cycle active
 output wire         dwb_stb,              // Strobe
 output wire         dwb_we,               // Write Enable
 output wire [3:0]   dwb_sel,              // Byte select (1=enabled)
-output wire [ADDR_WIDTH-1:2] dwb_adr,    // Word address
+output wire [31:2]           dwb_adr,    // Word address
 input  wire         dwb_ack,              // Acknowledge
 input  wire [31:0]  dwb_dat_i,            // Read data
 output wire [31:0]  dwb_dat_o             // Write data
@@ -206,12 +205,10 @@ RV32IMC (all features always enabled)
 // Smallest address space for cost-sensitive applications
 FemtoRV32_PetitPipe_WB #(
     .RESET_ADDR(32'h00000000),
-    .ADDR_WIDTH(16),               // 64 KB max addressable
     .IWB_BURST_LEN(4)              // Standard 4-word prefetch
 ) core (...);
 
 soc_dual_port_controller #(
-    .ADDR_WIDTH(16),
     .LATENCY(1)                    // Fast on-chip SRAM
 ) mem_ctrl (...);
 
@@ -224,12 +221,10 @@ soc_dual_port_controller #(
 // Typical embedded system configuration
 FemtoRV32_PetitPipe_WB #(
     .RESET_ADDR(32'h00000000),
-    .ADDR_WIDTH(18),               // 256 KB address space
     .IWB_BURST_LEN(4)
 ) core (...);
 
 soc_dual_port_controller #(
-    .ADDR_WIDTH(18),
     .LATENCY(2)                    // Realistic FPGA/ASIC memory
 ) mem_ctrl (...);
 
@@ -239,10 +234,9 @@ soc_dual_port_controller #(
 
 ### Large SoC (24-bit, 16 MB, Default)
 ```verilog
-// Maximum recommended: 24-bit addressing (default ADDR_WIDTH)
+// Maximum recommended: 24-bit addressing (default ADDR_WIDTH[removed])
 FemtoRV32_PetitPipe_WB #(
     .RESET_ADDR(32'h80000000),    // Boot from 0x80000000 (high memory)
-    .ADDR_WIDTH(24),               // 16 MB address space (DEFAULT)
     .IWB_BURST_LEN(4)
 ) core (...);
 
@@ -252,7 +246,6 @@ FemtoRV32_PetitPipe_WB #(
 // Main: 256MB DRAM (10-50 cycles)
 
 soc_dual_port_controller #(
-    .ADDR_WIDTH(24),
     .LATENCY(1)                    // Front-end fast SRAM
 ) mem_ctrl (...);
 
@@ -262,9 +255,12 @@ soc_dual_port_controller #(
 
 ---
 
-## ADDR_WIDTH Selection Guide
+## Address Range
 
-| ADDR_WIDTH | Address Range | Memory Size | Use Case |
+The address bus is always 32 bits, covering the full 4 GB RISC-V address space.
+The internal PC, mepc, mtvec, and load/store address computations all use full 32-bit values.
+
+
 |------------|---------------|-------------|----------|
 | 16 | 0x0000 - 0xFFFF | 64 KB | Toy projects, simulation |
 | 18 | 0x00000 - 0x3FFFF | 256 KB | Small embedded systems |
@@ -299,18 +295,19 @@ soc_dual_port_controller #(
 
 ### For RTL Compilation (specify Verilog parameters)
 
-The **only** parameters that can be overridden during compilation are: `RESET_ADDR`, `ADDR_WIDTH`, `IWB_BURST_LEN`
+The **only** parameters that can be overridden during compilation are: `RESET_ADDR`, `IWB_BURST_LEN`
+(`ADDR_WIDTH[removed]` has been removed; addresses are always 32-bit.)
 
 ```bash
 # Method 1: Using -p flag (not recommended, parameterless works better)
 iverilog -g2009 \
     -p FemtoRV32_PetitPipe_WB.RESET_ADDR=32\'h80000000 \
-    -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH=20 \
+    -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH[removed]=20 \
     rtl/femtorv32_petitpipe.v \
     -o build/sim
 
 # Method 2: In Makefile (recommended)
-VFLAGS += -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH=20
+VFLAGS += -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH[removed]=20
 ```
 
 ### For Synthesis (FPGA/ASIC)
@@ -329,7 +326,6 @@ module soc_config(
 // Override parameters in instantiation
 FemtoRV32_PetitPipe_WB #(
     .RESET_ADDR(32'h80000000),    // Custom boot address
-    .ADDR_WIDTH(24),               // 16 MB address space
     .IWB_BURST_LEN(4)              // 4-word cache lines
 ) core_inst (
     .clk(clk),
@@ -345,7 +341,6 @@ endmodule
 // Instance with custom parameters
 FemtoRV32_PetitPipe_WB #(
     .RESET_ADDR(32'h00000000),     // Where to jump on reset
-    .ADDR_WIDTH(24),               // 16 MB address space
     .IWB_BURST_LEN(4)              // 4-word cache line prefetch
 ) processor (
     .clk(sys_clk),
@@ -385,8 +380,8 @@ FemtoRV32_PetitPipe_WB #(
 initial begin
     $display("Core Configuration:");
     $display("  RESET_ADDR = 0x%h", RESET_ADDR);
-    $display("  ADDR_WIDTH = %d bits (%d MB address space)", 
-             ADDR_WIDTH, 1 << (ADDR_WIDTH - 20));
+    $display("  ADDR_WIDTH[removed] = %d bits (%d MB address space)", 
+             ADDR_WIDTH[removed], 1 << (ADDR_WIDTH[removed] - 20));
     $display("  IWB_BURST_LEN = %d words", IWB_BURST_LEN);
 end
 ```
@@ -395,12 +390,12 @@ end
 ```bash
 # Verify program fits in configured address space
 ls -la build/test.hex
-# For 16-bit ADDR_WIDTH: max 64KB (2^16 words = 65536 bytes max)
-# For 24-bit ADDR_WIDTH: max 16MB (2^24 words)
+# For 16-bit ADDR_WIDTH[removed]: max 64KB (2^16 words = 65536 bytes max)
+# For 24-bit ADDR_WIDTH[removed]: max 16MB (2^24 words)
 
 # Check hex file size
 hexdump -C build/test.hex | tail -1
-# Should show last address < (1 << ADDR_WIDTH)
+# Should show last address < (1 << ADDR_WIDTH[removed])
 ```
 
 ---

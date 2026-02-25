@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide walks through integrating FemtoRV32_PetitPipe_WB into a larger System-on-Chip (SoC) design. The core exports two Wishbone bus interfaces for instruction and data memory access, plus interrupt lines and a simple clock/reset interface.
+This guide walks through integrating FemtoRV32_PetitPipe_WB into a larger System-on-Chip (SoC) design. The core exports two Wishbone bus interfaces for instruction and data memory access (PetitPipe), or a single shared bus (Gracilis), plus interrupt lines and a simple clock/reset interface.
 
 ## Core Module Interface
 
@@ -100,7 +100,6 @@ wire [31:0]  dwb_dat_i, dwb_dat_o;
 
 // Recommended: 16KB instruction memory + 8KB data memory minimum
 soc_dual_port_controller #(
-    .ADDR_WIDTH(16),        // 16-bit → 64KB each
     .LATENCY(1)             // 1-cycle latency (on-chip SRAM)
 ) mem_ctrl (
     .clk(clk),

@@ -55,7 +55,7 @@ module tb_perf_compare;
    wire        pp_iwb_we_o, pp_iwb_cyc_o, pp_iwb_stb_o;
    wire  [2:0] pp_iwb_cti_o;
    wire  [1:0] pp_iwb_bte_o;
-   reg  [31:0] pp_iwb_dat_i;
+   wire [31:0] pp_iwb_dat_i;  // driven combinatorially (see I-bus model below)
    reg         pp_iwb_ack_i;
 
    wire [31:0] pp_dwb_adr_o, pp_dwb_dat_o;
@@ -219,18 +219,22 @@ module tb_perf_compare;
    end
 
    // -------------------------------------------------------------------------
-   // PetitPipe I-bus: pipelined, zero-latency (ack registered from cyc&stb)
+   // PetitPipe I-bus: pipelined, 1-cycle registered ack.
+   //
+   // Data must be combinatorial (wire) so it always reflects the current
+   // burst address at the moment ack fires.  If data were registered one
+   // cycle behind the address, the burst wrapper would advance burst_addr
+   // on each ack and store each word into the wrong cache-buffer slot
+   // (slot N would receive word N-1), corrupting the entire cache line.
    // -------------------------------------------------------------------------
    wire [31:0] pp_i_idx = pp_iwb_adr_o[31:2];
+   // Combinatorial data: always valid for the current burst address.
+   assign pp_iwb_dat_i = (pp_i_idx < MEM_WORDS) ? pp_mem[pp_i_idx] : 32'h00000013;
    always @(posedge clk) begin
-      if (!reset_n) begin
+      if (!reset_n)
          pp_iwb_ack_i <= 1'b0;
-         pp_iwb_dat_i <= 32'b0;
-      end else begin
+      else
          pp_iwb_ack_i <= pp_iwb_cyc_o & pp_iwb_stb_o;
-         if (pp_iwb_cyc_o & pp_iwb_stb_o)
-            pp_iwb_dat_i <= (pp_i_idx < MEM_WORDS) ? pp_mem[pp_i_idx] : 32'h00000013;
-      end
    end
 
    // -------------------------------------------------------------------------
