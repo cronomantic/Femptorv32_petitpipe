@@ -2,7 +2,7 @@
 
 ## Overview
 
-FemtoRV32_PetitPipe_WB implements two independent Wishbone B4 buses:
+FemtoRV32_PetitPipe_WB implements two independent Wishbone B4 buses (32-bit addresses):
 - **Instruction Bus (iwb_*)**: Pipelined protocol with burst prefetch
 - **Data Bus (dwb_*)**: Classic single-transaction protocol
 
@@ -157,3 +157,37 @@ reset_n: 1---0100...PCstarts driving instructionon 100...
 - [ ] Both buses run on same clock
 - [ ] Reset applied for ≥2 cycles before first instruction
 - [ ] Interrupt lines stable (or synchronized if async source)
+
+---
+
+## FemtoRV32_Gracilis_WB — Single Wishbone Bus
+
+`FemtoRV32_Gracilis_WB` uses a **single shared classic Wishbone bus** for both instruction fetch and data access. Because the gracilis state machine never issues an instruction fetch and a data access simultaneously, no arbitration is required.
+
+### Interface
+
+```
+output [31:0]  wb_adr_o   // byte address (word-aligned)
+output [31:0]  wb_dat_o   // write data
+output  [3:0]  wb_sel_o   // byte enables
+output         wb_we_o    // write enable
+output         wb_cyc_o   // bus cycle
+output         wb_stb_o   // strobe
+output  [2:0]  wb_cti_o   // cycle type indicator (3'b111 = end of cycle)
+output  [1:0]  wb_bte_o   // burst type extension (2'b00)
+input  [31:0]  wb_dat_i   // read data
+input          wb_ack_i   // acknowledge
+```
+
+### Protocol
+
+Classic Wishbone (no burst). Each instruction fetch and each data access is a single transaction:
+- `CTI = 3'b111` (end-of-cycle) on all transactions
+- `BTE = 2'b00`
+- Zero or more wait cycles permitted (ack may take multiple cycles)
+- Instruction fetch and data access are mutually exclusive
+
+### No Instruction Cache
+
+Unlike `FemtoRV32_PetitPipe_WB`, the Gracilis core has **no instruction prefetch cache**. Every instruction is fetched from the bus individually. This simplifies the interface at the cost of higher fetch latency on memories with wait states.
+

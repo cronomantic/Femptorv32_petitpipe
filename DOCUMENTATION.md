@@ -19,7 +19,7 @@ make sim-wb        # Run Wishbone testbench with cache
 ## Architecture Overview
 
 ### Core Features
-- **2-Stage Pipeline**: IF/EX with split I/D buses
+- **2-Stage Pipeline**: IF/EX with split I/D buses (32-bit full addressing)
 - **ISA Support**: RV32IMC (base + M extension + compressed instructions)
 - **Instruction Cache**: 4-word line prefetch on pipelined I-bus
 - **Interrupts**: 8-priority encoder with CSR support
@@ -81,3 +81,21 @@ See subdirectories:
 - `docs/WISHBONE_INTERFACE.md` - Pin-by-pin specification
 - `docs/CSR_REFERENCE.md` - Control/Status Register layout
 - `docs/PARAMETERS.md` - Configuration options
+
+---
+
+## FemtoRV32_Gracilis_WB
+
+A 4-state state-machine core (`femtorv32_gracilis_wb.v`) derived from Bruno Levy's
+original *Gracilis* processor, adapted with:
+
+- **Single classic Wishbone master bus** shared between instruction fetch and data
+  access (no burst, no instruction cache — each word fetched individually)
+- **8 independent IRQ lines** with priority encoder; `mcause` follows the RISC-V
+  privileged specification (bit 31 = interrupt flag, bits [3:0] = IRQ index)
+- **Full 32-bit addressing** — `ADDR_WIDTH[removed]` parameter removed
+- Synchronous active-low reset
+
+See `docs/WISHBONE_INTERFACE.md` for the bus interface and
+`docs/PERFORMANCE_METRICS.md` for a cycle-count comparison against PetitPipe.
+

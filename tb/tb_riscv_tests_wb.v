@@ -8,7 +8,6 @@
 
 module tb_riscv_tests_wb;
    localparam MEM_WORDS = 262144; // 1 MB (word-addressed)
-   localparam ADDR_WIDTH = 24;
    localparam IWB_BURST_LEN = 4;
    localparam [31:0] TOHOST_ADDR = 32'h00001000;
    localparam [31:0] FROMHOST_ADDR = 32'h00001008;
@@ -50,7 +49,6 @@ module tb_riscv_tests_wb;
 
    FemtoRV32_PetitPipe_WB #(
       .RESET_ADDR(32'h00000000),
-      .ADDR_WIDTH(ADDR_WIDTH),
       .IWB_BURST_LEN(IWB_BURST_LEN)
    ) dut (
       .clk(clk),

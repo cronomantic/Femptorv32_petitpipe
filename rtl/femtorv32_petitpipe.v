@@ -18,7 +18,6 @@
 //
 // Parameters:
 //   RESET_ADDR: Initial PC value (default 0x00000000)
-//   ADDR_WIDTH: Internal address bus width (default 24 bits)
 //   IWB_BURST_LEN: Instruction prefetch cache size (default 4 words)
 //
 // Bruno Levy, Matthias Koch, 2020-2021
@@ -95,8 +94,8 @@
 //
 // CSR REGISTERS:
 //   mstatus[3]: Global interrupt enable (bit 3 = MIE)
-//   mtvec[ADDR_WIDTH-1:0]: Interrupt handler base address
-//   mepc[ADDR_WIDTH-1:0]: Exception/interrupt return address
+//   mtvec[31:0]: Interrupt handler base address
+//   mepc[31:0]: Exception/interrupt return address
 //   mcause[31:0]: Exception/interrupt cause (bit 31 = interrupt flag, [3:0] = code)
 //   cycles[63:0]: Cycle counter (incremented every clock; bits [31:0] readable via mstatus, [63:32] via cyclesh)
 //
@@ -126,30 +125,29 @@ module FemtoRV32_Core_P2(
 );
 
    parameter RESET_ADDR       = 32'h00000000;
-   parameter ADDR_WIDTH       = 24;
 
    /***************************************************************************/
    // Instruction fetch stage with RVC/unaligned handling.
    /***************************************************************************/
 
-   reg  [ADDR_WIDTH-1:0] PC_if;
-   reg  [ADDR_WIDTH-1:2] cached_addr;
+   reg  [31:0] PC_if;
+   reg  [31:2] cached_addr;
    reg           [31:0] cached_data;
    reg                  fetch_second_half;
    reg                  if_pending;
 
-   wire [ADDR_WIDTH-1:0] PCplus4_if = PC_if + 4;
-   wire [ADDR_WIDTH-1:0] PCplus2_if = PC_if + 2;
+   wire [31:0] PCplus4_if = PC_if + 4;
+   wire [31:0] PCplus2_if = PC_if + 2;
 
    /* verilator lint_off WIDTH */
    assign i_addr = fetch_second_half
-                 ? {PCplus4_if[ADDR_WIDTH-1:2], 2'b00}
-                 : {PC_if     [ADDR_WIDTH-1:2], 2'b00};
+                 ? {PCplus4_if[31:2], 2'b00}
+                 : {PC_if     [31:2], 2'b00};
    /* verilator lint_on WIDTH */
 
    assign i_rstrb = if_pending;
 
-   wire current_cache_hit = cached_addr == PC_if[ADDR_WIDTH-1:2];
+   wire current_cache_hit = cached_addr == PC_if[31:2];
    wire [31:0] cached_mem = current_cache_hit ? cached_data : i_rdata;
    wire [31:0] decomp_input = PC_if[1] ? {i_rdata[15:0], cached_mem[31:16]}
                                       : cached_mem;
@@ -165,7 +163,7 @@ module FemtoRV32_Core_P2(
 
    reg         id_valid;
    reg  [31:2] id_instr;
-   reg  [ADDR_WIDTH-1:0] id_pc;
+   reg  [31:0] id_pc;
    reg         id_long;
 
    wire instr_ready = if_pending & ~i_rbusy;
@@ -295,12 +293,12 @@ module FemtoRV32_Core_P2(
         funct3Is[6] &  LTU |
         funct3Is[7] & !LTU ;
 
-   wire [ADDR_WIDTH-1:0] PCplusImm = id_pc + ( instr[3] ? Jimm[ADDR_WIDTH-1:0] :
-                                               instr[4] ? Uimm[ADDR_WIDTH-1:0] :
-                                                          Bimm[ADDR_WIDTH-1:0] );
+   wire [31:0] PCplusImm = id_pc + ( instr[3] ? Jimm[31:0] :
+                                               instr[4] ? Uimm[31:0] :
+                                                          Bimm[31:0] );
 
-   wire [ADDR_WIDTH-1:0] loadstore_addr = rs1[ADDR_WIDTH-1:0] +
-                   (instr[5] ? Simm[ADDR_WIDTH-1:0] : Iimm[ADDR_WIDTH-1:0]);
+   wire [31:0] loadstore_addr = rs1[31:0] +
+                   (instr[5] ? Simm[31:0] : Iimm[31:0]);
 
    wire mem_byteAccess     = instr[13:12] == 2'b00;
    wire mem_halfwordAccess = instr[13:12] == 2'b01;
@@ -331,8 +329,8 @@ module FemtoRV32_Core_P2(
               4'b1111;
 
    // CSR/interrupts
-   reg  [ADDR_WIDTH-1:0] mepc;
-   reg  [ADDR_WIDTH-1:0] mtvec;
+   reg  [31:0] mepc;
+   reg  [31:0] mtvec;
    reg                   mstatus;
    reg  [31:0]            mcause;
    reg  [63:0]            cycles;
@@ -381,9 +379,9 @@ module FemtoRV32_Core_P2(
    wire [31:0] irq_cause = {28'b0, (irq_prio == 0 ? 4'd0 : irq_prio[3:0] - 4'd1)};
    wire [31:0] irq_mcause = interrupt ? (32'h80000000 | irq_cause) : 32'b0;
 
-   wire [ADDR_WIDTH-1:0] PCinc = id_long ? (id_pc + 4) : (id_pc + 2);
-   wire [ADDR_WIDTH-1:0] PC_new =
-           isJALR           ? {aluPlus[ADDR_WIDTH-1:1],1'b0} :
+   wire [31:0] PCinc = id_long ? (id_pc + 4) : (id_pc + 2);
+   wire [31:0] PC_new =
+           isJALR           ? {aluPlus[31:1],1'b0} :
            (isJAL | (isBranch & predicate)) ? PCplusImm :
            interrupt_return ? mepc :
                               PCinc;
@@ -412,12 +410,12 @@ module FemtoRV32_Core_P2(
 
    wire writeBack_en = ex_fire & ~(isBranch | isStore);
 
-   wire ex_flush = ex_fire & (interrupt | isJAL | (isBranch & predicate) | interrupt_return);
+   wire ex_flush = ex_fire & (interrupt | isJAL | isJALR | (isBranch & predicate) | interrupt_return);
 
    always @(posedge clk) begin
       if (!reset_n) begin
-         PC_if <= RESET_ADDR[ADDR_WIDTH-1:0];
-         cached_addr <= {ADDR_WIDTH-2{1'b1}};
+         PC_if <= RESET_ADDR[31:0];
+         cached_addr <= {30{1'b1}};
          cached_data <= 32'b0;
          fetch_second_half <= 1'b0;
          if_pending <= 1'b0;
@@ -456,7 +454,7 @@ module FemtoRV32_Core_P2(
          // CSR writes
          if (isSYSTEM & (instr[14:12] != 0) & ex_fire) begin
             if (sel_mstatus) mstatus <= CSR_write[3];
-            if (sel_mtvec  ) mtvec   <= CSR_write[ADDR_WIDTH-1:0];
+            if (sel_mtvec  ) mtvec   <= CSR_write[31:0];
          end
 
          // Writeback
@@ -486,7 +484,7 @@ module FemtoRV32_Core_P2(
 
             if (instr_ready) begin
                if (~current_cache_hit | fetch_second_half) begin
-                  cached_addr <= i_addr[ADDR_WIDTH-1:2];
+                  cached_addr <= i_addr[31:2];
                   cached_data <= i_rdata;
                end
 
@@ -535,7 +533,6 @@ endmodule
 
 module FemtoRV32_PetitPipe_WB #(
    parameter RESET_ADDR       = 32'h00000000,
-   parameter ADDR_WIDTH       = 24,
    parameter integer IWB_BURST_LEN = 4
 )(
    input          clk,
@@ -588,8 +585,7 @@ module FemtoRV32_PetitPipe_WB #(
    wire        d_wbusy;
 
    FemtoRV32_Core_P2 #(
-      .RESET_ADDR(RESET_ADDR),
-      .ADDR_WIDTH(ADDR_WIDTH)
+      .RESET_ADDR(RESET_ADDR)
    ) core (
       .clk(clk),
       .i_addr(i_addr),
@@ -611,36 +607,36 @@ module FemtoRV32_PetitPipe_WB #(
    reg [31:0] d_rdata_reg;
 
    assign i_rdata = (i_rstrb & instr_hit) ? iwb_buf[instr_word_idx] : i_rdata_reg;
-   assign d_rdata = d_rdata_reg;
+   assign d_rdata = dwb_ack_i ? dwb_dat_i : d_rdata_reg;
 
    // Instruction wishbone (pipelined, read-only)
    localparam integer IWB_BURST_BITS = (IWB_BURST_LEN <= 1) ? 1 : $clog2(IWB_BURST_LEN);
-   localparam [ADDR_WIDTH-3:0] IWB_BURST_LEN_W = IWB_BURST_LEN;
+   localparam [29:0] IWB_BURST_LEN_W = IWB_BURST_LEN;
 
    reg                         iwb_burst_active;
-   reg  [ADDR_WIDTH-3:0]        iwb_base_addr;
-   reg  [ADDR_WIDTH-3:0]        iwb_burst_addr;
+   reg  [29:0]        iwb_base_addr;
+   reg  [29:0]        iwb_burst_addr;
    reg  [IWB_BURST_BITS:0]      iwb_beats_left;
    reg  [IWB_BURST_LEN-1:0]     iwb_word_valid;
    reg                         iwb_buf_valid;
    reg  [31:0]                  iwb_buf [0:IWB_BURST_LEN-1];
 
-   wire [ADDR_WIDTH-3:0] instr_word_addr = i_addr[ADDR_WIDTH-1:2];
-   wire [ADDR_WIDTH-3:0] iwb_base_calc = (IWB_BURST_LEN <= 1) ?
+   wire [29:0] instr_word_addr = i_addr[31:2];
+   wire [29:0] iwb_base_calc = (IWB_BURST_LEN <= 1) ?
                                           instr_word_addr :
                                           (instr_word_addr / IWB_BURST_LEN) * IWB_BURST_LEN;
-   wire [ADDR_WIDTH-3:0] iwb_base_end = iwb_base_addr + IWB_BURST_LEN_W;
+   wire [29:0] iwb_base_end = iwb_base_addr + IWB_BURST_LEN_W;
    wire                  instr_in_range = (instr_word_addr >= iwb_base_addr) &
                                           (instr_word_addr <  iwb_base_end);
-   wire [ADDR_WIDTH-3:0] instr_word_off = instr_word_addr - iwb_base_addr;
+   wire [29:0] instr_word_off = instr_word_addr - iwb_base_addr;
    wire [IWB_BURST_BITS-1:0] instr_word_idx = instr_word_off[IWB_BURST_BITS-1:0];
    wire                  instr_hit = iwb_buf_valid & instr_in_range & iwb_word_valid[instr_word_idx];
 
-   wire [ADDR_WIDTH-3:0] iwb_curr_off = iwb_burst_addr - iwb_base_addr;
+   wire [29:0] iwb_curr_off = iwb_burst_addr - iwb_base_addr;
    wire [IWB_BURST_BITS-1:0] iwb_curr_idx = iwb_curr_off[IWB_BURST_BITS-1:0];
    wire                  iwb_last_beat = iwb_burst_active & (iwb_beats_left == 1);
 
-   assign iwb_adr_o = { {(32-ADDR_WIDTH){1'b0}}, iwb_burst_addr, 2'b00 };
+   assign iwb_adr_o = {iwb_burst_addr, 2'b00 };
    assign iwb_dat_o = 32'b0;
    assign iwb_sel_o = 4'b1111;
    assign iwb_we_o  = 1'b0;
