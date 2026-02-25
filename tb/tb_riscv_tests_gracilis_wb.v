@@ -8,7 +8,6 @@
 
 module tb_riscv_tests_gracilis_wb;
    localparam MEM_WORDS      = 262144; // 1 MB (word-addressed)
-   localparam ADDR_WIDTH     = 24;
    localparam [31:0] TOHOST_ADDR   = 32'h00001000;
    localparam [31:0] FROMHOST_ADDR = 32'h00001008;
 
@@ -37,8 +36,7 @@ module tb_riscv_tests_gracilis_wb;
    reg         wb_ack_i;
 
    FemtoRV32_Gracilis_WB #(
-      .RESET_ADDR(32'h00000000),
-      .ADDR_WIDTH(ADDR_WIDTH)
+      .RESET_ADDR(32'h00000000)
    ) dut (
       .clk      (clk),
       .wb_adr_o (wb_adr_o),

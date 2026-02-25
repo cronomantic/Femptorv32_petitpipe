@@ -10,7 +10,6 @@
 //   - Jump that redirects the fetch state machine
 
 module tb_femtorv32_gracilis_wb;
-   localparam ADDR_WIDTH = 10;
    localparam MEM_WORDS  = 256;
 
    reg clk;
@@ -238,8 +237,7 @@ module tb_femtorv32_gracilis_wb;
    reg         wb_ack_i;
 
    FemtoRV32_Gracilis_WB #(
-      .RESET_ADDR(32'h00000000),
-      .ADDR_WIDTH(ADDR_WIDTH)
+      .RESET_ADDR(32'h00000000)
    ) dut (
       .clk      (clk),
       .wb_adr_o (wb_adr_o),

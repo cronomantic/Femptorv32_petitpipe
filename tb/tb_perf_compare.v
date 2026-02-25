@@ -18,7 +18,6 @@
 
 module tb_perf_compare;
    localparam MEM_WORDS     = 131072; // 512 KB word-addressed (matches tb_top.v)
-   localparam ADDR_WIDTH    = 32;     // full 32-bit addressing so EXIT_ADDR works
    localparam IWB_BURST_LEN = 4;
    localparam [31:0] EXIT_ADDR = 32'h10000000;
 
@@ -83,7 +82,6 @@ module tb_perf_compare;
    // -------------------------------------------------------------------------
    FemtoRV32_PetitPipe_WB #(
       .RESET_ADDR   (32'h00000000),
-      .ADDR_WIDTH   (ADDR_WIDTH),
       .IWB_BURST_LEN(IWB_BURST_LEN)
    ) pp_dut (
       .clk       (clk),
@@ -102,8 +100,7 @@ module tb_perf_compare;
    );
 
    FemtoRV32_Gracilis_WB #(
-      .RESET_ADDR(32'h00000000),
-      .ADDR_WIDTH(ADDR_WIDTH)
+      .RESET_ADDR(32'h00000000)
    ) gr_dut (
       .clk      (clk),
       .wb_adr_o (gr_wb_adr_o), .wb_dat_o (gr_wb_dat_o),

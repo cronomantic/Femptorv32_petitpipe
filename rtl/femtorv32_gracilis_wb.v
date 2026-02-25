@@ -17,7 +17,6 @@
 //
 // Parameters:
 //   RESET_ADDR: Initial program counter (default 0x00000000)
-//   ADDR_WIDTH: Internal address bus width (default 24 bits)
 //
 // Interfaces:
 //   wb_*:       single classic Wishbone master (instruction fetch + data r/w)
@@ -77,7 +76,6 @@ module FemtoRV32_Gracilis_Core (
 );
 
    parameter RESET_ADDR = 32'h00000000;
-   parameter ADDR_WIDTH = 24;
 
    /***************************************************************************/
    // State machine
@@ -249,29 +247,29 @@ module FemtoRV32_Gracilis_Core (
    // Program counter and address computation
    /***************************************************************************/
 
-   reg  [ADDR_WIDTH-1:0] PC;
+   reg  [31:0] PC;
    reg  [31:2]           instr;
    reg                   long_instr;
 
-   wire [ADDR_WIDTH-1:0] PCplus2 = PC + 2;
-   wire [ADDR_WIDTH-1:0] PCplus4 = PC + 4;
-   wire [ADDR_WIDTH-1:0] PCinc   = long_instr ? PCplus4 : PCplus2;
+   wire [31:0] PCplus2 = PC + 2;
+   wire [31:0] PCplus4 = PC + 4;
+   wire [31:0] PCinc   = long_instr ? PCplus4 : PCplus2;
 
-   wire [ADDR_WIDTH-1:0] PCplusImm = PC + ( instr[3] ? Jimm[ADDR_WIDTH-1:0] :
-                                            instr[4] ? Uimm[ADDR_WIDTH-1:0] :
-                                                       Bimm[ADDR_WIDTH-1:0] );
+   wire [31:0] PCplusImm = PC + ( instr[3] ? Jimm[31:0] :
+                                            instr[4] ? Uimm[31:0] :
+                                                       Bimm[31:0] );
 
-   wire [ADDR_WIDTH-1:0] loadstore_addr = rs1[ADDR_WIDTH-1:0] +
-                   (instr[5] ? Simm[ADDR_WIDTH-1:0] : Iimm[ADDR_WIDTH-1:0]);
+   wire [31:0] loadstore_addr = rs1[31:0] +
+                   (instr[5] ? Simm[31:0] : Iimm[31:0]);
 
    /* verilator lint_off WIDTH */
-   assign i_addr = fetch_second_half ? {PCplus4[ADDR_WIDTH-1:2], 2'b00}
-                                     : {PC     [ADDR_WIDTH-1:2], 2'b00};
+   assign i_addr = fetch_second_half ? {PCplus4[31:2], 2'b00}
+                                     : {PC     [31:2], 2'b00};
    assign d_addr = loadstore_addr;
    /* verilator lint_on WIDTH */
 
-   wire [ADDR_WIDTH-1:0] PC_new =
-           isJALR                         ? {aluPlus[ADDR_WIDTH-1:1], 1'b0} :
+   wire [31:0] PC_new =
+           isJALR                         ? {aluPlus[31:1], 1'b0} :
            isJAL | (isBranch & predicate) ? PCplusImm :
            interrupt_return               ? mepc :
                                             PCinc;
@@ -327,11 +325,11 @@ module FemtoRV32_Gracilis_Core (
    // an extra bus transaction.  This is NOT a prefetch cache.
    /***************************************************************************/
 
-   reg [ADDR_WIDTH-1:2] cached_addr;
+   reg [31:2] cached_addr;
    reg           [31:0] cached_data;
    reg                  fetch_second_half;
 
-   wire current_cache_hit = cached_addr == PC[ADDR_WIDTH-1:2];
+   wire current_cache_hit = cached_addr == PC[31:2];
 
    wire [31:0] cached_mem   = current_cache_hit ? cached_data : i_rdata;
    wire [31:0] decomp_input = PC[1] ? {i_rdata[15:0], cached_mem[31:16]}
@@ -346,8 +344,8 @@ module FemtoRV32_Gracilis_Core (
    // CSR registers and interrupt logic
    /***************************************************************************/
 
-   reg  [ADDR_WIDTH-1:0] mepc;
-   reg  [ADDR_WIDTH-1:0] mtvec;
+   reg  [31:0] mepc;
+   reg  [31:0] mtvec;
    reg                   mstatus; // global interrupt enable (MIE = bit 3)
    reg  [31:0]           mcause;  // bit 31 = interrupt, [3:0] = IRQ index
    reg  [63:0]           cycles;
@@ -434,12 +432,12 @@ module FemtoRV32_Gracilis_Core (
    always @(posedge clk) begin
       if (!reset_n) begin
          state                    <= WAIT_ALU_OR_MEM; // → FETCH_INSTR on first cycle
-         PC                       <= RESET_ADDR[ADDR_WIDTH-1:0];
+         PC                       <= RESET_ADDR[31:0];
          mcause                   <= 32'b0;
          mstatus                  <= 1'b0;
          mtvec                    <= 0;
          mepc                     <= 0;
-         cached_addr              <= {(ADDR_WIDTH-2){1'b1}}; // invalid address
+         cached_addr              <= {30{1'b1}}; // invalid address
          fetch_second_half        <= 1'b0;
          interrupt_request_sticky <= 1'b0;
          dividend                 <= 0;
@@ -469,7 +467,7 @@ module FemtoRV32_Gracilis_Core (
          // CSR writes (EXECUTE state only)
          if (isSYSTEM & (instr[14:12] != 0) & state[EXECUTE_bit]) begin
             if (sel_mstatus) mstatus <= CSR_write[3];
-            if (sel_mtvec  ) mtvec   <= CSR_write[ADDR_WIDTH-1:0];
+            if (sel_mtvec  ) mtvec   <= CSR_write[31:0];
          end
 
          (* parallel_case *)
@@ -479,7 +477,7 @@ module FemtoRV32_Gracilis_Core (
                if (!i_rbusy) begin
                   // Save fetched word for unaligned-RVC reassembly
                   if (~current_cache_hit | fetch_second_half) begin
-                     cached_addr <= i_addr[ADDR_WIDTH-1:2];
+                     cached_addr <= i_addr[31:2];
                      cached_data <= i_rdata;
                   end
 
@@ -554,8 +552,7 @@ endmodule
 /******************************************************************************/
 
 module FemtoRV32_Gracilis_WB #(
-   parameter RESET_ADDR = 32'h00000000,
-   parameter ADDR_WIDTH = 24
+   parameter RESET_ADDR = 32'h00000000
 )(
    input          clk,
 
@@ -590,8 +587,7 @@ module FemtoRV32_Gracilis_WB #(
    wire        d_wbusy;
 
    FemtoRV32_Gracilis_Core #(
-      .RESET_ADDR(RESET_ADDR),
-      .ADDR_WIDTH(ADDR_WIDTH)
+      .RESET_ADDR(RESET_ADDR)
    ) core (
       .clk      (clk),
       .i_addr   (i_addr),

@@ -11,7 +11,6 @@
 //   - Jump/branch instructions that may cause cache flushes
 
 module tb_femtorv32_wb;
-   localparam ADDR_WIDTH = 10;
    localparam MEM_WORDS  = 256;
    localparam IWB_BURST_LEN = 4;  // Instruction cache line size (4 words)
 
@@ -264,7 +263,6 @@ module tb_femtorv32_wb;
 
    FemtoRV32_PetitPipe_WB  #(
       .RESET_ADDR(32'h00000000),
-      .ADDR_WIDTH(ADDR_WIDTH),
       .IWB_BURST_LEN(4)
    ) dut (
       .clk(clk),
