@@ -52,10 +52,14 @@ DISASMS := $(patsubst %, $(BUILD_DIR)/disasm/%.dis, $(TESTS_NAME))
 SIM_EXE := $(BUILD_DIR)/sim/tb_top
 SIM_STUB_EXE := $(BUILD_DIR)/sim/tb_stub
 WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_wb
+GRACILIS_WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_gracilis_wb
+GRACILIS_RISCV_SIM_EXE := $(BUILD_DIR)/sim/tb_riscv_tests_gracilis_wb
 
 # Test bench files
 TB_FILES  := $(TB_DIR)/tb_top.v $(TB_DIR)/mem_model.v
 WB_TB_FILES := $(TB_DIR)/tb_femtorv32_wb.v $(REPO_ROOT)validation/protocol_checkers.v
+GRACILIS_WB_TB_FILES := $(TB_DIR)/tb_femtorv32_gracilis_wb.v $(REPO_ROOT)validation/protocol_checkers.v
+GRACILIS_RISCV_TB_FILES := $(TB_DIR)/tb_riscv_tests_gracilis_wb.v
 
 # Real RTL files (empty if not yet committed)
 RTL_FILES := $(wildcard $(RTL_DIR)/*.v)
@@ -153,6 +157,83 @@ sim-wb: $(WB_SIM_EXE)
 	fi
 
 # ---------------------------------------------------------------------------
+# Build Gracilis Wishbone test bench
+# FemtoRV32_Gracilis_WB is defined in femtorv32_gracilis_wb.v
+# ---------------------------------------------------------------------------
+ifeq ($(RTL_FILES),)
+$(GRACILIS_WB_SIM_EXE):
+	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
+	@echo "       Add femtorv32_gracilis_wb.v (contains FemtoRV32_Gracilis_WB) to rtl/"
+	@exit 1
+else
+$(GRACILIS_WB_SIM_EXE): $(GRACILIS_WB_TB_FILES) $(RTL_FILES)
+	@mkdir -p $(BUILD_DIR)/sim
+	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
+	    -o $@ $^
+endif
+
+# ---------------------------------------------------------------------------
+# Run Gracilis Wishbone test bench
+# ---------------------------------------------------------------------------
+.PHONY: sim-gracilis-wb
+sim-gracilis-wb: $(GRACILIS_WB_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(GRACILIS_WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_gracilis_wb.log
+	@if grep -q "GRACILIS WB CORE FUNCTIONAL" $(BUILD_DIR)/results/tb_femtorv32_gracilis_wb.log; then \
+	    echo ""; echo "[TB PASS] Gracilis Wishbone test bench passed"; \
+	else \
+	    echo ""; echo "[TB FAIL] Gracilis Wishbone test bench failed"; exit 1; \
+	fi
+
+# ---------------------------------------------------------------------------
+# Build Gracilis riscv-tests Wishbone test bench
+# ---------------------------------------------------------------------------
+ifeq ($(RTL_FILES),)
+$(GRACILIS_RISCV_SIM_EXE):
+	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
+	@echo "       Add femtorv32_gracilis_wb.v (contains FemtoRV32_Gracilis_WB) to rtl/"
+	@exit 1
+else
+$(GRACILIS_RISCV_SIM_EXE): $(GRACILIS_RISCV_TB_FILES) $(RTL_FILES)
+	@mkdir -p $(BUILD_DIR)/sim
+	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
+	    -o $@ $^
+endif
+
+# ---------------------------------------------------------------------------
+# Run a single riscv-test on Gracilis WB
+#   make sim-gracilis-<testname>  e.g.  make sim-gracilis-test_add
+# ---------------------------------------------------------------------------
+.PHONY: sim-gracilis-%
+sim-gracilis-%: $(BUILD_DIR)/hexes/%.hex $(GRACILIS_RISCV_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(GRACILIS_RISCV_SIM_EXE) +hex_file=$< \
+	    | tee $(BUILD_DIR)/results/gracilis_$*.log
+
+# ---------------------------------------------------------------------------
+# Run all riscv-tests on Gracilis WB
+# ---------------------------------------------------------------------------
+GRACILIS_RESULTS := $(patsubst %, $(BUILD_DIR)/results/gracilis_%.log, $(TESTS_NAME))
+
+$(BUILD_DIR)/results/gracilis_%.log: $(BUILD_DIR)/hexes/%.hex $(GRACILIS_RISCV_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(VVP) $(GRACILIS_RISCV_SIM_EXE) +hex_file=$< | tee $@
+
+.PHONY: sim-gracilis
+sim-gracilis: $(GRACILIS_RESULTS)
+	@echo ""
+	@echo "==============================="
+	@echo " Gracilis simulation results"
+	@echo "==============================="
+	@grep -h "\[TB" $(GRACILIS_RESULTS) || true
+	@echo ""
+	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(GRACILIS_RESULTS) 2>/dev/null; then \
+	    echo "RESULT: SOME TESTS FAILED"; exit 1; \
+	else \
+	    echo "RESULT: ALL TESTS PASSED"; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Run a single test
 # ---------------------------------------------------------------------------
 $(BUILD_DIR)/results/%.log: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
@@ -214,7 +295,10 @@ help:
 	@echo "  tb-check         Verify testbench syntax with stub RTL (iverilog)"
 	@echo "  sim              Run all simulation tests (requires RTL in rtl/)"
 	@echo "  sim-<name>       Run a single test, e.g. sim-test_add"
-	@echo "  sim-wb           Run Wishbone test bench (pipelined cache prefetch test)"
+	@echo "  sim-wb           Run PetitPipe Wishbone test bench (pipelined cache prefetch)"
+	@echo "  sim-gracilis-wb  Run Gracilis Wishbone test bench (state-machine core)"
+	@echo "  sim-gracilis     Run all riscv-tests on FemtoRV32_Gracilis_WB"
+	@echo "  sim-gracilis-<n> Run a single riscv-test on Gracilis, e.g. sim-gracilis-test_add"
 	@echo "  lint             Lint Verilog sources with Verilator"
 	@echo "  clean            Remove build artefacts"
 	@echo ""
