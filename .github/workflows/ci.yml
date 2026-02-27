@@ -3,7 +3,7 @@
 #
 # Jobs
 # ----
-#   testbench-syntax  Compile testbench + stub with Icarus Verilog
+#   testbench-syntax  Compile testbench + stub with Verilator
 #   compile-tests     Cross-compile all RV32I assembly tests
 #   simulate          Run full simulation (enabled when RTL is merged)
 
@@ -31,10 +31,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Icarus Verilog
+      - name: Install Verilator
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y iverilog
+          sudo apt-get install -y verilator build-essential
 
       - name: Check testbench syntax (stub build)
         run: make tb-check
@@ -89,7 +89,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            iverilog \
+            verilator \
+            build-essential \
             gcc-riscv64-unknown-elf \
             binutils-riscv64-unknown-elf
 
