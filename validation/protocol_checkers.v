@@ -78,7 +78,7 @@ module wishbone_protocol_checker (
                     // Instruction bus (pipelined with bursts)
                     if (cti != 3'b000 && cti != 3'b010 && cti != 3'b111) begin
                         invalid_cti <= 1'b1;
-                        error_msg = {"ERROR: Invalid CTI code: ", cti};
+                        error_msg <= {"ERROR: Invalid CTI code: ", cti};
                     end
                     
                     // CTI must transition: 010...010 -> 111
@@ -104,7 +104,7 @@ module wishbone_protocol_checker (
                 // Address must be stable
                 if (addr != addr_prev && stb_prev) begin
                     addr_change_during_transaction <= 1'b1;
-                    error_msg = {"ERROR: Address changed during transaction: ", addr_prev, " -> ", addr};
+                    error_msg <= {"ERROR: Address changed during transaction: ", addr_prev, " -> ", addr};
                 end
                 
                 // Data must be stable (write path)
@@ -211,7 +211,7 @@ module cache_protocol_checker (
                         // Continue burst: address must increment by 1 (word-aligned)
                         if (iwb_addr != burst_start_addr + burst_count) begin
                             cache_error <= 1'b1;
-                            error_msg = {"ERROR: Non-sequential cache burst address: ", 
+                            error_msg <= {"ERROR: Non-sequential cache burst address: ", 
                                         iwb_addr, " != ", burst_start_addr + burst_count};
                         end
                         

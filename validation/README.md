@@ -241,14 +241,14 @@ endmodule
 ### Running with Validation
 
 ```bash
-# Compile with checkers
-iverilog -g2009 \
-    rtl/femtorv32_petitpipe.v \
-    rtl/perf_monitor.v \
-    validation/protocol_checkers.v \
-    examples/soc_examples.v \
-    tb/tb_femtorv32_wb.v \
-    -o build/sim_validated
+# Compile with checkers (Verilator)
+verilator --cc --exe --build --timing --trace -Wall -Wno-fatal \
+    --top-module tb_femtorv32_wb --Mdir build/sim/obj_tb_femtorv32_wb \
+    -CFLAGS "-DVM_TOP=Vtb_femtorv32_wb -DVM_TOP_HEADER=\\\"Vtb_femtorv32_wb.h\\\"" \
+    -I tb -o build/sim_validated \
+    rtl/femtorv32_petitpipe.v rtl/perf_monitor.v \
+    validation/protocol_checkers.v examples/soc_examples.v \
+    tb/tb_femtorv32_wb.v tb/sim_main.cpp
 
 # Run - will report errors
 ./build/sim_validated 2>&1 | grep -E "ERROR|WARNING"

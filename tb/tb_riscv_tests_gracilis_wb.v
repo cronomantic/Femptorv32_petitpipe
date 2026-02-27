@@ -98,7 +98,7 @@ module tb_riscv_tests_gracilis_wb;
    task dump_signature;
       integer fd;
       reg [31:0] addr;
-      begin
+      begin : dump_signature
          if (sig_start == 32'h0 || sig_end == 32'h0 || sig_end <= sig_start) begin
             $display("[TB] Signature range not provided; skipping dump.");
             disable dump_signature;

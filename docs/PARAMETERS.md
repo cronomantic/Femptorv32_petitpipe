@@ -299,15 +299,16 @@ The **only** parameters that can be overridden during compilation are: `RESET_AD
 (`ADDR_WIDTH[removed]` has been removed; addresses are always 32-bit.)
 
 ```bash
-# Method 1: Using -p flag (not recommended, parameterless works better)
-iverilog -g2009 \
-    -p FemtoRV32_PetitPipe_WB.RESET_ADDR=32\'h80000000 \
-    -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH[removed]=20 \
-    rtl/femtorv32_petitpipe.v \
-    -o build/sim
+# Method 1: Verilator -G overrides (only when the core is the top module)
+verilator --cc --exe --build --timing --trace -Wall -Wno-fatal \
+    --top-module FemtoRV32_PetitPipe_WB --Mdir build/sim/obj_core \
+    -GRESET_ADDR=32'h80000000 -GIWB_BURST_LEN=4 \
+    -CFLAGS "-DVM_TOP=VFemtoRV32_PetitPipe_WB -DVM_TOP_HEADER=\\\"VFemtoRV32_PetitPipe_WB.h\\\"" \
+    rtl/femtorv32_petitpipe.v tb/sim_main.cpp \
+    -o build/sim_core
 
-# Method 2: In Makefile (recommended)
-VFLAGS += -p FemtoRV32_PetitPipe_WB.ADDR_WIDTH[removed]=20
+# Method 2: In Makefile (only if the top module exposes the parameters)
+VLTFLAGS += -GRESET_ADDR=32'h80000000 -GIWB_BURST_LEN=4
 ```
 
 ### For Synthesis (FPGA/ASIC)

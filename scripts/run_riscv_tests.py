@@ -16,6 +16,7 @@ BUILD_DIR = ROOT / "build" / "riscv_tests"
 SIM_EXE = ROOT / "build" / "sim" / "tb_riscv_tests_wb"
 TB_FILE = ROOT / "tb" / "tb_riscv_tests_wb.v"
 RTL_FILE = ROOT / "rtl" / "femtorv32_petitpipe.v"
+SIM_MAIN = ROOT / "tb" / "sim_main.cpp"
 
 INCLUDES = [
     RISCV_TESTS / "env" / "p",
@@ -39,14 +40,26 @@ def run(cmd, cwd=None):
 def ensure_sim():
     SIM_EXE.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "iverilog",
-        "-g2012",
-        "-I",
-        str(ROOT / "tb"),
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "--timing",
+        "--trace-fst",
+        "-Wall",
+        "-Wno-fatal",
+        "--top-module",
+        "tb_riscv_tests_wb",
+        "--Mdir",
+        str(SIM_EXE.parent / "obj_tb_riscv_tests_wb"),
+        "-CFLAGS",
+        "-O2 -DVM_TOP=Vtb_riscv_tests_wb -DVM_TOP_HEADER=\\\"Vtb_riscv_tests_wb.h\\\"",
+        f"-I{ROOT / 'tb'}",
         "-o",
         str(SIM_EXE),
         str(TB_FILE),
         str(RTL_FILE),
+        str(SIM_MAIN),
     ]
     run(cmd)
 
@@ -93,7 +106,6 @@ def get_signature_addrs(elf_path):
 
 def run_test(hexfile, sig_start, sig_end, sig_out, max_cycles):
     cmd = [
-        "vvp",
         str(SIM_EXE),
         f"+hex_file={hexfile}",
         f"+signature_file={sig_out}",

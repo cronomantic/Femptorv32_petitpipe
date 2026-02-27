@@ -10,7 +10,7 @@
 // is recorded.  When both finish, a comparison table is printed.
 //
 // Usage:
-//   vvp build/sim/tb_perf_compare +hex_file=<path> [+max_cycles=N] [+test_name=<s>]
+//   build/sim/tb_perf_compare +hex_file=<path> [+max_cycles=N] [+test_name=<s>]
 //
 // Architectural differences under test:
 //   PetitPipe : 2-stage pipeline, dual Wishbone buses, 4-word burst I-cache

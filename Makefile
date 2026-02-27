@@ -23,9 +23,9 @@ ARCH_FLAGS   := -march=rv32i -mabi=ilp32
 CFLAGS       := $(ARCH_FLAGS) -nostdlib -nostartfiles -static -Wall \
                 -Wl,--no-warn-rwx-segments
 
-IVERILOG     ?= iverilog
-VVP          ?= vvp
-IVFLAGS      := -g2012
+VERILATOR    ?= verilator
+VLTFLAGS     := --cc --exe --build --timing --trace-fst -Wall -Wno-fatal
+CXXFLAGS     ?= -O2
 
 # ---------------------------------------------------------------------------
 # Directory layout
@@ -105,10 +105,12 @@ compile: $(HEXES) $(DISASMS)
 # ---------------------------------------------------------------------------
 # Build simulator with stub RTL (testbench syntax check only)
 # ---------------------------------------------------------------------------
-$(SIM_STUB_EXE): $(TB_FILES) $(RTL_DIR)/stub/FemptorV32_petitpipe.v
+$(SIM_STUB_EXE): $(TB_FILES) $(RTL_DIR)/stub/FemptorV32_petitpipe.v $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_top \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_stub \
+	    -CFLAGS "$(CXXFLAGS)" \
+	    -I$(TB_DIR) -o $@ $^
 
 .PHONY: tb-check
 tb-check: $(SIM_STUB_EXE)
@@ -123,10 +125,12 @@ $(SIM_EXE):
 	@echo "       Add FemptorV32_petitpipe.v (and any supporting modules) to rtl/"
 	@exit 1
 else
-$(SIM_EXE): $(TB_FILES) $(RTL_FILES)
+$(SIM_EXE): $(TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_top \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_top \
+	    -CFLAGS "$(CXXFLAGS)" \
+	    -I$(TB_DIR) -o $@ $^
 endif
 
 # ---------------------------------------------------------------------------
@@ -139,10 +143,12 @@ $(WB_SIM_EXE):
 	@echo "       Add femtorv32_petitpipe.v (contains FemtoRV32_PetitPipe_WB) to rtl/"
 	@exit 1
 else
-$(WB_SIM_EXE): $(WB_TB_FILES) $(RTL_FILES)
+$(WB_SIM_EXE): $(WB_TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_femtorv32_wb \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_femtorv32_wb \
+	    -CFLAGS "$(CXXFLAGS) -DVM_TOP=Vtb_femtorv32_wb -DVM_TOP_HEADER=\\\"Vtb_femtorv32_wb.h\\\"" \
+	    -I$(TB_DIR) -o $@ $^
 endif
 
 # ---------------------------------------------------------------------------
@@ -151,7 +157,7 @@ endif
 .PHONY: sim-wb
 sim-wb: $(WB_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_wb.log
+	$(WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_wb.log
 	@if grep -q "INSTRUCTION CACHE FUNCTIONAL" $(BUILD_DIR)/results/tb_femtorv32_wb.log; then \
 	    echo ""; echo "[TB PASS] Wishbone test bench with instruction cache passed"; \
 	else \
@@ -168,10 +174,12 @@ $(GRACILIS_WB_SIM_EXE):
 	@echo "       Add femtorv32_gracilis_wb.v (contains FemtoRV32_Gracilis_WB) to rtl/"
 	@exit 1
 else
-$(GRACILIS_WB_SIM_EXE): $(GRACILIS_WB_TB_FILES) $(RTL_FILES)
+$(GRACILIS_WB_SIM_EXE): $(GRACILIS_WB_TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_femtorv32_gracilis_wb \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_femtorv32_gracilis_wb \
+	    -CFLAGS "$(CXXFLAGS) -DVM_TOP=Vtb_femtorv32_gracilis_wb -DVM_TOP_HEADER=\\\"Vtb_femtorv32_gracilis_wb.h\\\"" \
+	    -I$(TB_DIR) -o $@ $^
 endif
 
 # ---------------------------------------------------------------------------
@@ -180,7 +188,7 @@ endif
 .PHONY: sim-gracilis-wb
 sim-gracilis-wb: $(GRACILIS_WB_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(GRACILIS_WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_gracilis_wb.log
+	$(GRACILIS_WB_SIM_EXE) | tee $(BUILD_DIR)/results/tb_femtorv32_gracilis_wb.log
 	@if grep -q "GRACILIS WB CORE FUNCTIONAL" $(BUILD_DIR)/results/tb_femtorv32_gracilis_wb.log; then \
 	    echo ""; echo "[TB PASS] Gracilis Wishbone test bench passed"; \
 	else \
@@ -196,10 +204,12 @@ $(GRACILIS_RISCV_SIM_EXE):
 	@echo "       Add femtorv32_gracilis_wb.v (contains FemtoRV32_Gracilis_WB) to rtl/"
 	@exit 1
 else
-$(GRACILIS_RISCV_SIM_EXE): $(GRACILIS_RISCV_TB_FILES) $(RTL_FILES)
+$(GRACILIS_RISCV_SIM_EXE): $(GRACILIS_RISCV_TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_riscv_tests_gracilis_wb \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_riscv_tests_gracilis_wb \
+	    -CFLAGS "$(CXXFLAGS) -DVM_TOP=Vtb_riscv_tests_gracilis_wb -DVM_TOP_HEADER=\\\"Vtb_riscv_tests_gracilis_wb.h\\\"" \
+	    -I$(TB_DIR) -o $@ $^
 endif
 
 # ---------------------------------------------------------------------------
@@ -209,7 +219,7 @@ endif
 .PHONY: sim-gracilis-%
 sim-gracilis-%: $(BUILD_DIR)/hexes/%.hex $(GRACILIS_RISCV_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(GRACILIS_RISCV_SIM_EXE) +hex_file=$< \
+	$(GRACILIS_RISCV_SIM_EXE) +hex_file=$< \
 	    | tee $(BUILD_DIR)/results/gracilis_$*.log
 
 # ---------------------------------------------------------------------------
@@ -219,7 +229,7 @@ GRACILIS_RESULTS := $(patsubst %, $(BUILD_DIR)/results/gracilis_%.log, $(TESTS_N
 
 $(BUILD_DIR)/results/gracilis_%.log: $(BUILD_DIR)/hexes/%.hex $(GRACILIS_RISCV_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(GRACILIS_RISCV_SIM_EXE) +hex_file=$< | tee $@
+	$(GRACILIS_RISCV_SIM_EXE) +hex_file=$< | tee $@
 
 .PHONY: sim-gracilis
 sim-gracilis: $(GRACILIS_RESULTS)
@@ -243,10 +253,12 @@ $(PERF_SIM_EXE):
 	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
 	@exit 1
 else
-$(PERF_SIM_EXE): $(PERF_TB_FILES) $(RTL_FILES)
+$(PERF_SIM_EXE): $(PERF_TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
 	@mkdir -p $(BUILD_DIR)/sim
-	$(IVERILOG) $(IVFLAGS) -I$(TB_DIR) \
-	    -o $@ $^
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_perf_compare \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_perf_compare \
+	    -CFLAGS "$(CXXFLAGS) -DVM_TOP=Vtb_perf_compare -DVM_TOP_HEADER=\\\"Vtb_perf_compare.h\\\"" \
+	    -I$(TB_DIR) -o $@ $^
 endif
 
 # ---------------------------------------------------------------------------
@@ -256,7 +268,7 @@ endif
 .PHONY: perf-compare-%
 perf-compare-%: $(BUILD_DIR)/hexes/%.hex $(PERF_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(PERF_SIM_EXE) +hex_file=$< +test_name=$* \
+	$(PERF_SIM_EXE) +hex_file=$< +test_name=$* \
 	    | tee $(BUILD_DIR)/results/perf_$*.log
 
 # ---------------------------------------------------------------------------
@@ -266,7 +278,7 @@ PERF_RESULTS := $(patsubst %, $(BUILD_DIR)/results/perf_%.log, $(TESTS_NAME))
 
 $(BUILD_DIR)/results/perf_%.log: $(BUILD_DIR)/hexes/%.hex $(PERF_SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(PERF_SIM_EXE) +hex_file=$< +test_name=$* | tee $@
+	$(PERF_SIM_EXE) +hex_file=$< +test_name=$* | tee $@
 
 .PHONY: perf-compare
 perf-compare: compile $(PERF_RESULTS)
@@ -287,13 +299,13 @@ perf-compare: compile $(PERF_RESULTS)
 # ---------------------------------------------------------------------------
 $(BUILD_DIR)/results/%.log: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(SIM_EXE) +hex_file=$< | tee $@
+	$(SIM_EXE) +hex_file=$< | tee $@
 
 # Convenience target: make sim-test_add
 .PHONY: sim-%
 sim-%: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
 	@mkdir -p $(BUILD_DIR)/results
-	$(VVP) $(SIM_EXE) +hex_file=$< | tee $(BUILD_DIR)/results/$*.log
+	$(SIM_EXE) +hex_file=$< | tee $(BUILD_DIR)/results/$*.log
 
 # ---------------------------------------------------------------------------
 # Run all tests
@@ -346,7 +358,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  compile          Compile all RV32I assembly tests to ELF + hex"
-	@echo "  tb-check         Verify testbench syntax with stub RTL (iverilog)"
+	@echo "  tb-check         Verify testbench syntax with stub RTL (verilator)"
 	@echo "  sim              Run all simulation tests (requires RTL in rtl/)"
 	@echo "  sim-<name>       Run a single test, e.g. sim-test_add"
 	@echo "  sim-wb           Run PetitPipe Wishbone test bench (pipelined cache prefetch)"
@@ -360,6 +372,5 @@ help:
 	@echo ""
 	@echo "Toolchain variables (override as needed):"
 	@echo "  RISCV_PREFIX     RISC-V toolchain prefix (default: riscv64-unknown-elf-)"
-	@echo "  IVERILOG         Icarus Verilog compiler (default: iverilog)"
-	@echo "  VVP              Icarus Verilog runtime (default: vvp)"
+	@echo "  VERILATOR        Verilator compiler (default: verilator)"
 	@echo ""

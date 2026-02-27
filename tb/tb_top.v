@@ -4,11 +4,12 @@
 // Connects the real Wishbone core to an inline memory model.
 // Compatible with the same test programs used by tb_riscv_tests_wb.v.
 //
-// Usage (iverilog / vvp):
-//   iverilog -g2012 -I tb -o build/sim/tb_top \
-//       tb/tb_top.v tb/mem_model.v rtl/femtorv32_petitpipe.v \
-//       rtl/femtorv32_gracilis_wb.v rtl/perf_monitor.v
-//   vvp build/sim/tb_top +hex_file=build/hexes/test_add.hex
+// Usage (verilator):
+//   $ verilator --cc --exe --build --timing --trace -Wall -Wno-fatal \
+//       --top-module tb_top --Mdir build/sim/obj_tb_top -I tb \
+//       -o build/sim/tb_top tb/tb_top.v tb/mem_model.v tb/sim_main.cpp \
+//       rtl/femtorv32_petitpipe.v rtl/femtorv32_gracilis_wb.v rtl/perf_monitor.v
+//   $ build/sim/tb_top +hex_file=build/hexes/test_add.hex
 //
 // Optional plusargs:
 //   +hex_file=<path>  – path to the Verilog hex program image (required)

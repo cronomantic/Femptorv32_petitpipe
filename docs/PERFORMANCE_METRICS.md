@@ -345,7 +345,7 @@ the cycle count for each.
 ```
 make perf-compare-<test>
 # or
-vvp build/sim/tb_perf_compare +hex_file=<path> +test_name=<name>
+build/sim/tb_perf_compare +hex_file=<path> +test_name=<name>
 ```
 
 ### Example results (3-instruction ALU loop, zero-wait-state Wishbone)
