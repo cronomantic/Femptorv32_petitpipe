@@ -110,7 +110,7 @@ soc_dual_port_controller #(
     .LATENCY(1)             // 1-cycle latency (on-chip SRAM)
 ) mem_ctrl (
     .clk(clk),
-    .rst(!reset_n),
+    .rst(!reset_n),   // soc_dual_port_controller uses active-HIGH rst; invert reset_n here
     
     .iwb_cyc(iwb_cyc),
     .iwb_stb(iwb_stb),

@@ -152,6 +152,7 @@ FemtoRV32_PetitPipe_WB #(
 ) cpu (
     .clk       (clk),
     .reset_n   (reset_n),           // Synchronous, active LOW
+                                    // Hold LOW for ≥2 rising edges before release
 
     // Instruction bus (pipelined burst)
     .iwb_cyc_o (iwb_cyc),
