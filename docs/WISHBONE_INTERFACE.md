@@ -142,10 +142,12 @@ Word write:           sel=4'b1111
 
 ### Reset Timing
 ```
-reset_n: 1---0100...PCstarts driving instructionon 100...
-         ^       ^^                         ^
-    before rst   rstrst release (edges are synchronous)
+reset_n: 1  1  0  0  0  1  1  1  ...
+clk:     ^  ^  ^  ^  ^  ^  ^  ^
+                           ^
+                     reset released — core starts fetching from RESET_ADDR
 ```
+Reset must be held LOW for at least 2 rising clock edges before release.
 
 ---
 
