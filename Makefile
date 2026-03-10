@@ -54,6 +54,7 @@ SIM_STUB_EXE := $(BUILD_DIR)/sim/tb_stub
 WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_wb
 GRACILIS_WB_SIM_EXE := $(BUILD_DIR)/sim/tb_femtorv32_gracilis_wb
 GRACILIS_RISCV_SIM_EXE := $(BUILD_DIR)/sim/tb_riscv_tests_gracilis_wb
+PIPEDREAM_RISCV_SIM_EXE := $(BUILD_DIR)/sim/tb_riscv_tests_pipedream_wb
 PERF_SIM_EXE := $(BUILD_DIR)/sim/tb_perf_compare
 
 # Test bench files
@@ -61,6 +62,7 @@ TB_FILES  := $(TB_DIR)/tb_top.v $(TB_DIR)/mem_model.v
 WB_TB_FILES := $(TB_DIR)/tb_femtorv32_wb.v $(REPO_ROOT)validation/protocol_checkers.v
 GRACILIS_WB_TB_FILES := $(TB_DIR)/tb_femtorv32_gracilis_wb.v $(REPO_ROOT)validation/protocol_checkers.v
 GRACILIS_RISCV_TB_FILES := $(TB_DIR)/tb_riscv_tests_gracilis_wb.v
+PIPEDREAM_RISCV_TB_FILES := $(TB_DIR)/tb_riscv_tests_pipedream_wb.v
 PERF_TB_FILES := $(TB_DIR)/tb_perf_compare.v
 
 # Real RTL files (empty if not yet committed)
@@ -246,6 +248,57 @@ sim-gracilis: $(GRACILIS_RESULTS)
 	fi
 
 # ---------------------------------------------------------------------------
+# Build Pipedream riscv-tests Wishbone test bench
+# FemtoRV32_Pipedream_WB is defined in femtorv32_pipedream.v
+# ---------------------------------------------------------------------------
+ifeq ($(RTL_FILES),)
+$(PIPEDREAM_RISCV_SIM_EXE):
+	@echo "ERROR: No RTL files found in $(RTL_DIR)/"
+	@echo "       Add femtorv32_pipedream.v (contains FemtoRV32_Pipedream_WB) to rtl/"
+	@exit 1
+else
+$(PIPEDREAM_RISCV_SIM_EXE): $(PIPEDREAM_RISCV_TB_FILES) $(RTL_FILES) $(TB_DIR)/sim_main.cpp
+	@mkdir -p $(BUILD_DIR)/sim
+	$(VERILATOR) $(VLTFLAGS) --top-module tb_riscv_tests_pipedream_wb \
+	    --Mdir $(BUILD_DIR)/sim/obj_tb_riscv_tests_pipedream_wb \
+	    -CFLAGS "$(CXXFLAGS) -DVM_TOP=Vtb_riscv_tests_pipedream_wb -DVM_TOP_HEADER=\\\"Vtb_riscv_tests_pipedream_wb.h\\\"" \
+	    -I$(TB_DIR) -o $@ $^
+endif
+
+# ---------------------------------------------------------------------------
+# Run a single riscv-test on Pipedream WB
+#   make sim-pipedream-<testname>  e.g.  make sim-pipedream-test_add
+# ---------------------------------------------------------------------------
+.PHONY: sim-pipedream-%
+sim-pipedream-%: $(BUILD_DIR)/hexes/%.hex $(PIPEDREAM_RISCV_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(PIPEDREAM_RISCV_SIM_EXE) +hex_file=$< \
+	    | tee $(BUILD_DIR)/results/pipedream_$*.log
+
+# ---------------------------------------------------------------------------
+# Run all riscv-tests on Pipedream WB
+# ---------------------------------------------------------------------------
+PIPEDREAM_RESULTS := $(patsubst %, $(BUILD_DIR)/results/pipedream_%.log, $(TESTS_NAME))
+
+$(BUILD_DIR)/results/pipedream_%.log: $(BUILD_DIR)/hexes/%.hex $(PIPEDREAM_RISCV_SIM_EXE)
+	@mkdir -p $(BUILD_DIR)/results
+	$(PIPEDREAM_RISCV_SIM_EXE) +hex_file=$< | tee $@
+
+.PHONY: sim-pipedream
+sim-pipedream: $(PIPEDREAM_RESULTS)
+	@echo ""
+	@echo "==============================="
+	@echo " Pipedream simulation results"
+	@echo "==============================="
+	@grep -h "\[TB" $(PIPEDREAM_RESULTS) || true
+	@echo ""
+	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(PIPEDREAM_RESULTS) 2>/dev/null; then \
+	    echo "RESULT: SOME TESTS FAILED"; exit 1; \
+	else \
+	    echo "RESULT: ALL TESTS PASSED"; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Build performance-comparison test bench (PetitPipe vs Gracilis)
 # ---------------------------------------------------------------------------
 ifeq ($(RTL_FILES),)
@@ -313,7 +366,7 @@ sim-%: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
 RESULTS := $(patsubst %, $(BUILD_DIR)/results/%.log, $(TESTS_NAME))
 
 .PHONY: sim
-sim: $(RESULTS) $(GRACILIS_RESULTS)
+sim: $(RESULTS) $(GRACILIS_RESULTS) $(PIPEDREAM_RESULTS)
 	@echo ""
 	@echo "==============================="
 	@echo " PetitPipe simulation results"
@@ -325,7 +378,13 @@ sim: $(RESULTS) $(GRACILIS_RESULTS)
 	@echo "==============================="
 	@grep -h "\[TB" $(GRACILIS_RESULTS) || true
 	@echo ""
-	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(RESULTS) $(GRACILIS_RESULTS) 2>/dev/null; then \
+	@echo "==============================="
+	@echo " Pipedream simulation results"
+	@echo "==============================="
+	@grep -h "\[TB" $(PIPEDREAM_RESULTS) || true
+	@echo ""
+	@if grep -q "\[TB FAIL\]\|\[TB TIMEOUT\]" $(RESULTS) $(GRACILIS_RESULTS) \
+	                                           $(PIPEDREAM_RESULTS) 2>/dev/null; then \
 	    echo "RESULT: SOME TESTS FAILED"; exit 1; \
 	else \
 	    echo "RESULT: ALL TESTS PASSED"; \
@@ -365,6 +424,8 @@ help:
 	@echo "  sim-gracilis-wb  Run Gracilis Wishbone test bench (state-machine core)"
 	@echo "  sim-gracilis     Run all riscv-tests on FemtoRV32_Gracilis_WB"
 	@echo "  sim-gracilis-<n> Run a single riscv-test on Gracilis, e.g. sim-gracilis-test_add"
+	@echo "  sim-pipedream    Run all riscv-tests on FemtoRV32_Pipedream_WB"
+	@echo "  sim-pipedream-<n> Run a single riscv-test on Pipedream, e.g. sim-pipedream-test_add"
 	@echo "  perf-compare     Run all tests on both cores, print cycle-count comparison"
 	@echo "  perf-compare-<n> Run a single test comparison, e.g. perf-compare-test_add"
 	@echo "  lint             Lint Verilog sources with Verilator"

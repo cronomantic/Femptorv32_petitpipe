@@ -11,13 +11,15 @@ Key characteristics:
 - **Interrupts**: 8-priority encoder with CSR support (RISC-V privileged spec)
 - **Bus Interface**: Wishbone B4 — pipelined instruction bus (`iwb_*`), classic data bus (`dwb_*`)
 - **Reference core**: `femtorv32_gracilis_wb.v` — a 4-state state-machine core used for comparison
+- **Optimised reference**: `femtorv32_pipedream.v` — single-bus 2-cycle-per-instruction core derived from Gracilis via exec-time prefetch
 
 ## Repository Layout
 
 ```
 rtl/           Synthesisable Verilog source files
-  femtorv32_petitpipe.v        Main pipelined processor
-  femtorv32_gracilis_wb.v      Reference state-machine core
+  femtorv32_petitpipe.v        Main pipelined processor (2-stage IF/EX, split buses)
+  femtorv32_gracilis_wb.v      Reference state-machine core (single WB bus)
+  femtorv32_pipedream.v        Optimised single-bus core (exec-time prefetch variant of Gracilis)
   perf_monitor.v               Performance monitoring module
   stub/                        Syntax-check stubs (not for synthesis)
 tb/            Verilator testbench (C++ driver + Verilog memory model)
