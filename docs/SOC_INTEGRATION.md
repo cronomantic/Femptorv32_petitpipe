@@ -9,31 +9,39 @@ This guide walks through integrating FemtoRV32_PetitPipe_WB into a larger System
 ### Top-Level Entity
 
 ```verilog
-module FemtoRV32_PetitPipe_WB (
+module FemtoRV32_PetitPipe_WB #(
+    parameter RESET_ADDR       = 32'h00000000,
+    parameter integer IWB_BURST_LEN = 4
+) (
     input  clk,
-    input  reset,                   // Active HIGH
-    
+    input  reset_n,                  // Active LOW, synchronous
+
     // Instruction Bus (Wishbone B4 Pipelined)
-    output wire         iwb_cyc,    // Cycle active
-    output wire         iwb_stb,    // Strobe (valid address)
-    output wire [31:2]  iwb_adr,    // Word-addressed 30-bit address
-    output wire [2:0]   iwb_cti,    // Cycle type: 010=continue, 111=end, 000=classic
-    input  wire         iwb_ack,    // Acknowledge
-    input  wire [31:0]  iwb_dat_i,  // Read data
-    
+    output [31:0] iwb_adr_o,         // Byte address (word-aligned)
+    output [31:0] iwb_dat_o,         // Write data (always 0)
+    output  [3:0] iwb_sel_o,         // Byte select (always 4'b1111)
+    output        iwb_we_o,          // Write enable (always 0)
+    output        iwb_cyc_o,         // Cycle active during burst
+    output        iwb_stb_o,         // Strobe (one per beat)
+    output  [2:0] iwb_cti_o,         // CTI: 010=continue, 111=end
+    output  [1:0] iwb_bte_o,         // Burst type (always 2'b00)
+    input  [31:0] iwb_dat_i,         // Read data from slave
+    input         iwb_ack_i,         // Acknowledge (data valid)
+
     // Data Bus (Wishbone B4 Classic)
-    output wire         dwb_cyc,    // Cycle active
-    output wire         dwb_stb,    // Strobe
-    output wire         dwb_we,     // Write enable
-    output wire [3:0]   dwb_sel,    // Byte select
-    output wire [31:2]  dwb_adr,    // Word-addressed 30-bit address
-    input  wire         dwb_ack,    // Acknowledge
-    input  wire [31:0]  dwb_dat_i,  // Read data
-    output wire [31:0]  dwb_dat_o,  // Write data
-    
-    // Interrupt inputs (active HIGH, priority encoded)
-    input  wire [7:0]   irq,        // Interrupt requests
-    output wire         irq_ack     // Interrupt acknowledge
+    output [31:0] dwb_adr_o,         // Byte address
+    output [31:0] dwb_dat_o,         // Write data
+    output  [3:0] dwb_sel_o,         // Byte select
+    output        dwb_we_o,          // Write enable
+    output        dwb_cyc_o,         // Cycle active
+    output        dwb_stb_o,         // Strobe
+    output  [2:0] dwb_cti_o,         // CTI (always 3'b111)
+    output  [1:0] dwb_bte_o,         // Burst type (always 2'b00)
+    input  [31:0] dwb_dat_i,         // Read data from slave
+    input         dwb_ack_i,         // Acknowledge
+
+    // Interrupts
+    input   [7:0] irq_i              // Interrupt requests (irq_i[0]=highest)
 );
 ```
 
@@ -42,36 +50,35 @@ module FemtoRV32_PetitPipe_WB (
 | Signal | Dir | Width | Description |
 |--------|-----|-------|-------------|
 | `clk` | In | 1 | Main clock (rising edge triggered) |
-| `reset` | In | 1 | Active HIGH reset (synchronous to clk) |
-| `iwb_cyc` | Out | 1 | Instruction bus cycle active |
-| `iwb_stb` | Out | 1 | Instruction strobe (with iwb_cti) |
-| `iwb_adr` | Out | 30 | Instruction address (bits [31:2]) |
-| `iwb_cti` | Out | 3 | Cycle type indicator for burst protocol |
-| `iwb_ack` | In | 1 | Instruction ACK (data valid) |
+| `reset_n` | In | 1 | Active LOW synchronous reset |
+| `iwb_cyc_o` | Out | 1 | Instruction bus cycle active |
+| `iwb_stb_o` | Out | 1 | Instruction strobe (one per beat) |
+| `iwb_adr_o` | Out | 32 | Instruction address (byte-aligned, word address) |
+| `iwb_cti_o` | Out | 3 | CTI: 010=burst continue, 111=burst end |
 | `iwb_dat_i` | In | 32 | Instruction data from memory |
-| `dwb_cyc` | Out | 1 | Data bus cycle active |
-| `dwb_stb` | Out | 1 | Data strobe |
-| `dwb_we` | Out | 1 | Write enable (1=write, 0=read) |
-| `dwb_sel` | Out | 4 | Byte select (1=enabled byte) |
-| `dwb_adr` | Out | 30 | Data address (bits [31:2]) |
-| `dwb_ack` | In | 1 | Data ACK |
-| `dwb_dat_i` | In | 32 | Data read from memory |
+| `iwb_ack_i` | In | 1 | Instruction beat acknowledged |
+| `dwb_cyc_o` | Out | 1 | Data bus cycle active |
+| `dwb_stb_o` | Out | 1 | Data strobe |
+| `dwb_we_o` | Out | 1 | Write enable (1=write, 0=read) |
+| `dwb_sel_o` | Out | 4 | Byte select (1=enabled byte) |
+| `dwb_adr_o` | Out | 32 | Data address (byte-aligned) |
 | `dwb_dat_o` | Out | 32 | Data write to memory |
-| `irq[7:0]` | In | 8 | Interrupt request lines (irq[0]=highest priority) |
-| `irq_ack` | Out | 1 | Interrupt acknowledge (clock pulse) |
+| `dwb_dat_i` | In | 32 | Data read from memory |
+| `dwb_ack_i` | In | 1 | Data transaction complete |
+| `irq_i[7:0]` | In | 8 | Interrupt request lines (irq_i[0]=highest priority) |
 
 ## Reset Sequence
 
 ```verilog
 // SoC reset controller
 initial begin
-    reset = 1'b1;              // Assert HIGH
+    reset_n = 1'b0;            // Assert LOW (reset active)
     #(10 * CLK_PERIOD);
-    reset = 1'b0;              // Release LOW (inactive)
+    reset_n = 1'b1;            // Release HIGH (reset inactive)
 end
 
 // Core begins execution at address 0x00000000
-// Fetch of reset vector happens after reset release
+// Fetch of reset vector happens after reset_n goes HIGH
 ```
 
 **Reset effects on core**:
@@ -88,38 +95,38 @@ Create a memory controller that responds to both bus interfaces:
 
 ```verilog
 // Example: soc_dual_port_controller in examples/soc_examples.v
-wire         iwb_cyc, iwb_stb, iwb_ack;
-wire [31:2]  iwb_adr;
-wire [2:0]   iwb_cti;
-wire [31:0]  iwb_dat_o;
+wire        iwb_cyc, iwb_stb, iwb_ack;
+wire [31:0] iwb_adr;
+wire  [2:0] iwb_cti;
+wire [31:0] iwb_dat_i;
 
-wire         dwb_cyc, dwb_stb, dwb_we, dwb_ack;
-wire [3:0]   dwb_sel;
-wire [31:2]  dwb_adr;
-wire [31:0]  dwb_dat_i, dwb_dat_o;
+wire        dwb_cyc, dwb_stb, dwb_we, dwb_ack;
+wire  [3:0] dwb_sel;
+wire [31:0] dwb_adr;
+wire [31:0] dwb_wdata, dwb_rdata;
 
 // Recommended: 16KB instruction memory + 8KB data memory minimum
 soc_dual_port_controller #(
     .LATENCY(1)             // 1-cycle latency (on-chip SRAM)
 ) mem_ctrl (
     .clk(clk),
-    .rst(reset),
+    .rst(!reset_n),
     
     .iwb_cyc(iwb_cyc),
     .iwb_stb(iwb_stb),
     .iwb_adr(iwb_adr),
     .iwb_cti(iwb_cti),
     .iwb_ack(iwb_ack),
-    .iwb_dat_o(iwb_dat_o),
+    .iwb_dat_o(iwb_dat_i),
     
     .dwb_cyc(dwb_cyc),
     .dwb_stb(dwb_stb),
     .dwb_we(dwb_we),
     .dwb_sel(dwb_sel),
     .dwb_adr(dwb_adr),
-    .dwb_dat_i(dwb_dat_i),
+    .dwb_dat_i(dwb_wdata),
     .dwb_ack(dwb_ack),
-    .dwb_dat_o(dwb_dat_o)
+    .dwb_dat_o(dwb_rdata)
 );
 ```
 
@@ -192,43 +199,48 @@ module soc_top (
     // Peripherals...
 );
 
-wire clk, reset;
+wire clk, reset_n;
 
 // Clock generation
 soc_clk_tree clk_tree (.clk_in(clk_in), .clk_core(clk));
 
-// Reset synchronizer (crosses clock domains if needed)
-wire reset_sync;
+// Reset synchronizer: rst_n (external, active LOW) → reset_n (core domain)
+wire reset_sync_n;
 sync_reset #(.WIDTH(2)) rst_sync (
     .clk(clk),
     .async_rst_n(rst_n),
-    .sync_rst(reset_sync)
+    .sync_rst_n(reset_sync_n)
 );
-assign reset = reset_sync;
+assign reset_n = reset_sync_n;
 
 // Core instantiation
 FemtoRV32_PetitPipe_WB core (
     .clk(clk),
-    .reset(reset),
+    .reset_n(reset_n),
     
-    .iwb_cyc(iwb_cyc),
-    .iwb_stb(iwb_stb),
-    .iwb_adr(iwb_adr),
-    .iwb_cti(iwb_cti),
-    .iwb_ack(iwb_ack),
+    .iwb_cyc_o(iwb_cyc),
+    .iwb_stb_o(iwb_stb),
+    .iwb_adr_o(iwb_adr),
+    .iwb_cti_o(iwb_cti),
+    .iwb_bte_o(),
+    .iwb_we_o(),
+    .iwb_sel_o(),
+    .iwb_dat_o(),
     .iwb_dat_i(iwb_dat_i),
+    .iwb_ack_i(iwb_ack),
     
-    .dwb_cyc(dwb_cyc),
-    .dwb_stb(dwb_stb),
-    .dwb_we(dwb_we),
-    .dwb_sel(dwb_sel),
-    .dwb_adr(dwb_adr),
-    .dwb_ack(dwb_ack),
-    .dwb_dat_i(dwb_dat_i),
-    .dwb_dat_o(dwb_dat_o),
+    .dwb_cyc_o(dwb_cyc),
+    .dwb_stb_o(dwb_stb),
+    .dwb_we_o(dwb_we),
+    .dwb_sel_o(dwb_sel),
+    .dwb_adr_o(dwb_adr),
+    .dwb_dat_o(dwb_wdata),
+    .dwb_cti_o(),
+    .dwb_bte_o(),
+    .dwb_dat_i(dwb_rdata),
+    .dwb_ack_i(dwb_ack),
     
-    .irq(irq_lines),
-    .irq_ack(irq_ack)
+    .irq_i(irq_lines)
 );
 
 endmodule

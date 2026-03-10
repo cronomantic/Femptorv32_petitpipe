@@ -70,7 +70,7 @@ For SoC integration, you need:
 - [ ] Memory controller with pipelined read support
 - [ ] Interrupt controller connecting to `irq_i[7:0]`
 - [ ] Arbiter for shared instruction/data memory
-- [ ] Reset sequencer for synchronous `reset_n`
+- [ ] Reset sequencer for synchronous `reset_n` (active LOW)
 - [ ] Clock domain crossing (if multi-clock)
 
 ---
@@ -93,7 +93,7 @@ original *Gracilis* processor, adapted with:
   access (no burst, no instruction cache — each word fetched individually)
 - **8 independent IRQ lines** with priority encoder; `mcause` follows the RISC-V
   privileged specification (bit 31 = interrupt flag, bits [3:0] = IRQ index)
-- **Full 32-bit addressing** — `ADDR_WIDTH[removed]` parameter removed
+- **Full 32-bit addressing** — the `ADDR_WIDTH` parameter from the original Gracilis has been removed; all addresses are hardcoded to 32 bits
 - Synchronous active-low reset
 
 See `docs/WISHBONE_INTERFACE.md` for the bus interface and
