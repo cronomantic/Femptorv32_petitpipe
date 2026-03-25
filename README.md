@@ -222,6 +222,7 @@ FemtoRV32_PetitPipe_WB #(
 | Document | Description |
 |---|---|
 | [`DOCUMENTATION.md`](DOCUMENTATION.md) | Architecture deep-dive and integration checklist |
+| [`docs/INSTRUCTION_TIMING.md`](docs/INSTRUCTION_TIMING.md) | Per-instruction cycle counts for PetitPipe, Pipedream, and Gracilis |
 | [`docs/WISHBONE_INTERFACE.md`](docs/WISHBONE_INTERFACE.md) | Complete Wishbone pin descriptions and timing diagrams |
 | [`docs/CSR_REFERENCE.md`](docs/CSR_REFERENCE.md) | CSR address map, field definitions, and assembly examples |
 | [`docs/PARAMETERS.md`](docs/PARAMETERS.md) | Verilog `parameter` reference with defaults and constraints |
