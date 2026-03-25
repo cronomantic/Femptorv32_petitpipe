@@ -369,6 +369,9 @@ individually (no cache) so its cycle count scales linearly with iteration count.
 - **Gracilis**: 4-state machine (FETCH\_INSTR → WAIT\_INSTR → EXECUTE →
   WAIT\_ALU\_OR\_MEM), single shared classic Wishbone bus, no instruction cache.
 
+For a full per-instruction cycle-count breakdown covering every RV32IMC instruction
+across all three cores, see [`INSTRUCTION_TIMING.md`](INSTRUCTION_TIMING.md).
+
 ### I-bus testbench timing note
 
 For correct burst simulation the PetitPipe I-bus slave must provide **combinatorial
