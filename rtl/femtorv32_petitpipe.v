@@ -199,6 +199,12 @@ module FemtoRV32_Core_P2(
 
    wire isALU = isALUimm | isALUreg;
 
+   // NeoVCS: el banco de registros son 1024 bits por nucleo, y Gowin los metia
+   // en 4 bloques de BSRAM cada uno -8 entre los dos nucleos, 144 Kbit para
+   // guardar 2-. El GW5A-25 tiene 180 Kbit de SSRAM distribuida sin usar.
+   // MEDIDO en P&R: recupera 8 bloques (16 KB de RAM) y sube la frecuencia un
+   // 6,5 %, porque el banco deja de estar en un bloque lejano del ALU.
+   (* syn_ramstyle = "distributed_ram" *)
    reg [31:0] registerFile [31:0];
    integer _i_p2;
    initial begin
