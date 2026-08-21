@@ -101,7 +101,14 @@
 //
 /******************************************************************************/
 
-module FemtoRV32_Core_P2(
+module FemtoRV32_Core_P2 #(
+   parameter        RESET_ADDR = 32'h00000000,
+   // Identificador de hart, legible en mhartid (0xF14). Con un solo nucleo se
+   // deja a 0 y nada cambia; con varios, cada instancia lleva el suyo y el
+   // software los distingue leyendolo. RISC-V exige que al menos un hart
+   // tenga mhartid = 0.
+   parameter [31:0] HARTID     = 32'd0
+) (
    input          clk,
 
    // Instruction bus
@@ -124,7 +131,6 @@ module FemtoRV32_Core_P2(
    input         reset_n      // synchronous reset, active low
 );
 
-   parameter RESET_ADDR       = 32'h00000000;
 
    /***************************************************************************/
    // Instruction fetch stage with RVC/unaligned handling.
@@ -364,6 +370,7 @@ module FemtoRV32_Core_P2(
    wire sel_mcause  = (instr[31:20] == 12'h342);
    wire sel_cycles  = (instr[31:20] == 12'hC00);
    wire sel_cyclesh = (instr[31:20] == 12'hC80);
+   wire sel_mhartid = (instr[31:20] == 12'hF14);   // NeoVCS: solo lectura
 
    /* verilator lint_off WIDTH */
    wire [31:0] CSR_read =
@@ -372,7 +379,8 @@ module FemtoRV32_Core_P2(
      (sel_mepc    ? mepc                   : 32'b0) |
      (sel_mcause  ? mcause                 : 32'b0) |
      (sel_cycles  ? cycles[31:0]           : 32'b0) |
-     (sel_cyclesh ? cycles[63:32]          : 32'b0) ;
+     (sel_cyclesh ? cycles[63:32]          : 32'b0) |
+     (sel_mhartid ? HARTID                 : 32'b0) ;
    /* verilator lint_on WIDTH */
 
    wire [31:0] CSR_modifier = instr[14] ? {27'd0, instr[19:15]} : rs1;
@@ -566,6 +574,7 @@ endmodule
 
 module FemtoRV32_PetitPipe_WB #(
    parameter RESET_ADDR       = 32'h00000000,
+   parameter [31:0] HARTID    = 32'd0,
    parameter integer IWB_BURST_LEN = 4
 )(
    input          clk,
@@ -618,7 +627,8 @@ module FemtoRV32_PetitPipe_WB #(
    wire        d_wbusy;
 
    FemtoRV32_Core_P2 #(
-      .RESET_ADDR(RESET_ADDR)
+      .RESET_ADDR(RESET_ADDR),
+      .HARTID(HARTID)
    ) core (
       .clk(clk),
       .i_addr(i_addr),
