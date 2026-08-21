@@ -17,7 +17,7 @@
 //             Executes instructions, manages hazards, and flushes on control flow changes
 //
 // Parameters:
-//   RESET_ADDR: Initial PC value (default 0x00000000)
+//   reset_pc: Initial PC value, as a SIGNAL (see the multi-hart note below)
 //   IWB_BURST_LEN: Instruction prefetch cache size (default 4 words)
 //
 // Bruno Levy, Matthias Koch, 2020-2021
@@ -102,7 +102,6 @@
 /******************************************************************************/
 
 module FemtoRV32_Core_P2 #(
-   parameter        RESET_ADDR = 32'h00000000,
    // Identificador de hart, legible en mhartid (0xF14). Con un solo nucleo se
    // deja a 0 y nada cambia; con varios, cada instancia lleva el suyo y el
    // software los distingue leyendolo. RISC-V exige que al menos un hart
@@ -110,6 +109,12 @@ module FemtoRV32_Core_P2 #(
    parameter [31:0] HARTID     = 32'd0
 ) (
    input          clk,
+
+   // Vector de reset COMO SENAL, no como parametro: en un sistema de varios
+   // harts el principal tiene que poder decirle al secundario donde arrancar,
+   // y un parametro se fija en sintesis. Solo se muestrea mientras reset_n
+   // esta activo, asi que basta con dejarlo estable antes de soltar el reset.
+   input  [31:0] reset_pc,
 
    // Instruction bus
    output [31:0] i_addr,
@@ -478,7 +483,7 @@ module FemtoRV32_Core_P2 #(
 
    always @(posedge clk) begin
       if (!reset_n) begin
-         PC_if <= RESET_ADDR[31:0];
+         PC_if <= reset_pc;
          cached_addr <= {30{1'b1}};
          cached_data <= 32'b0;
          fetch_second_half <= 1'b0;
@@ -673,10 +678,12 @@ module FemtoRV32_PetitPipe_WB #(
    wire        d_wbusy;
 
    FemtoRV32_Core_P2 #(
-      .RESET_ADDR(RESET_ADDR),
       .HARTID(HARTID)
    ) core (
       .clk(clk),
+      // El envoltorio mantiene RESET_ADDR como parametro y lo ata a la senal,
+      // asi que quien ya lo usaba no nota el cambio.
+      .reset_pc(RESET_ADDR[31:0]),
       .i_addr(i_addr),
       .i_rstrb(i_rstrb),
       .i_rdata(i_rdata),
