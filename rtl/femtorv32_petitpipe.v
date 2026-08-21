@@ -148,32 +148,42 @@ module FemtoRV32_Core_P2 #(
    // Instruction fetch stage with RVC/unaligned handling.
    /***************************************************************************/
 
+   // NeoVCS/Prowler: COLA DE INSTRUCCIONES DE DOS PALABRAS.
+   //
+   // Antes habia un unico registro de palabra cuyo trabajo era la alineacion de
+   // RVC, y la busqueda estaba pegada a la emision: un ciclo de bus por
+   // instruccion, y DOS para una instruccion de 32 bits a caballo entre dos
+   // palabras. Medido con codigo C real, eso hacia que -march=rv32imc costara
+   // un +71 % de ciclos y un +118 % de accesos frente a rv32im: la compresion
+   // salia carisima justo cuando deberia ahorrar.
+   //
+   // La cola desacopla busqueda de emision. Es una FIFO SECUENCIAL, no una
+   // cache: sin etiquetas, sin asociatividad y sin politica de reemplazo, asi
+   // que su patron de aciertos es funcion pura del flujo de instrucciones y el
+   // emulador lo reproduce exacto. Eso es lo que la separa de las caches, que
+   // el contrato de temporizacion prohibe.
+   //
+   // Invariante: q0 es SIEMPRE la palabra que contiene PC_if.
    reg  [31:0] PC_if;
-   reg  [31:2] cached_addr;
-   reg           [31:0] cached_data;
-   reg                  fetch_second_half;
-   reg                  if_pending;
+   reg  [31:0] q0, q1;          // palabra actual y la siguiente
+   reg         v0, v1;          // sus validos
+   reg  [31:0] fpc;             // direccion de la proxima palabra a buscar
 
-   wire [31:0] PCplus4_if = PC_if + 4;
-   wire [31:0] PCplus2_if = PC_if + 2;
+   assign i_addr = fpc;
 
-   /* verilator lint_off WIDTH */
-   assign i_addr = fetch_second_half
-                 ? {PCplus4_if[31:2], 2'b00}
-                 : {PC_if     [31:2], 2'b00};
-   /* verilator lint_on WIDTH */
+   // media instruccion apuntada por PC_if, para saber si es larga
+   wire [15:0] lo_half   = PC_if[1] ? q0[31:16] : q0[15:0];
+   wire        long_instr_if = &lo_half[1:0];
+   // una larga en mitad impar necesita ademas la palabra siguiente
+   wire        need_q1   = long_instr_if & PC_if[1];
+   wire        can_issue = v0 & (~need_q1 | v1);
 
-   assign i_rstrb = if_pending;
-
-   wire current_cache_hit = cached_addr == PC_if[31:2];
-   wire [31:0] cached_mem = current_cache_hit ? cached_data : i_rdata;
-   wire [31:0] decomp_input = PC_if[1] ? {i_rdata[15:0], cached_mem[31:16]}
-                                      : cached_mem;
+   wire [31:0] decomp_input = PC_if[1] ? {q1[15:0], q0[31:16]} : q0;
    wire [31:0] decompressed;
    decompressor _decomp_p2 ( .c(decomp_input), .d(decompressed) );
 
-   wire current_unaligned_long = &cached_mem[17:16] & PC_if[1];
-   wire long_instr_if = &decomp_input[1:0];
+   wire [31:0] PCplus4_if = PC_if + 4;
+   wire [31:0] PCplus2_if = PC_if + 2;
 
    /***************************************************************************/
    // IF/EX pipeline registers.
@@ -184,7 +194,28 @@ module FemtoRV32_Core_P2 #(
    reg  [31:0] id_pc;
    reg         id_long;
 
-   wire instr_ready = if_pending & ~i_rbusy;
+   // Se emite cuando la instruccion esta completa en la cola y EX puede tomarla
+   wire do_issue = can_issue & (~id_valid | ex_fire);
+   // Al avanzar, el PC cambia de palabra salvo que sea una corta en mitad par
+   wire shift    = do_issue & (PC_if[1] | long_instr_if);
+   // Hay hueco si alguna ranura esta libre, o va a quedarlo por el desplazamiento
+   wire room     = ~v0 | ~v1 | shift;
+   assign i_rstrb = room;
+   // La memoria entrega en el mismo ciclo salvo que pida espera
+   wire fill     = room & ~i_rbusy;
+
+   // Estado siguiente: primero el desplazamiento, despues el relleno en la
+   // primera ranura libre. En un ciclo pueden ocurrir las dos cosas.
+   reg [31:0] n_q0, n_q1;
+   reg        n_v0, n_v1;
+   always @* begin
+      n_q0 = shift ? q1    : q0;   n_v0 = shift ? v1    : v0;
+      n_q1 = shift ? 32'd0 : q1;   n_v1 = shift ? 1'b0  : v1;
+      if (fill) begin
+         if      (!n_v0) begin n_q0 = i_rdata; n_v0 = 1'b1; end
+         else if (!n_v1) begin n_q1 = i_rdata; n_v1 = 1'b1; end
+      end
+   end
 
    /***************************************************************************/
    // Decode and execute stage.
@@ -484,10 +515,9 @@ module FemtoRV32_Core_P2 #(
    always @(posedge clk) begin
       if (!reset_n) begin
          PC_if <= reset_pc;
-         cached_addr <= {30{1'b1}};
-         cached_data <= 32'b0;
-         fetch_second_half <= 1'b0;
-         if_pending <= 1'b0;
+         q0 <= 32'd0; q1 <= 32'd0;
+         v0 <= 1'b0;  v1 <= 1'b0;
+         fpc <= {reset_pc[31:2], 2'b00};
          id_valid <= 1'b0;
          id_instr <= 30'b0;
          id_pc <= 0;
@@ -559,38 +589,24 @@ module FemtoRV32_Core_P2 #(
 
          // Flush pipeline on control transfer
          if (ex_flush) begin
+            // Un salto vacia la cola entera: lo que hubiera dentro es de la
+            // ruta no tomada.
             PC_if <= interrupt ? mtvec : PC_new;
+            fpc   <= {(interrupt ? mtvec[31:2] : PC_new[31:2]), 2'b00};
+            v0 <= 1'b0; v1 <= 1'b0;
             id_valid <= 1'b0;
-            fetch_second_half <= 1'b0;
-            if_pending <= 1'b0;
          end else begin
-            // Issue fetch if IF can accept
-            if (!if_pending && (!id_valid || ex_fire)) begin
-               if_pending <= 1'b1;
-            end
+            q0 <= n_q0; q1 <= n_q1; v0 <= n_v0; v1 <= n_v1;
+            if (fill) fpc <= fpc + 4;
 
-            if (instr_ready) begin
-               if (~current_cache_hit | fetch_second_half) begin
-                  cached_addr <= i_addr[31:2];
-                  cached_data <= i_rdata;
-               end
-
-               if (current_unaligned_long & ~fetch_second_half) begin
-                  fetch_second_half <= 1'b1;
-                  if_pending <= 1'b1;
-               end else begin
-                  id_valid <= 1'b1;
-                  id_instr <= decompressed[31:2];
-                  id_pc <= PC_if;
-                  id_long <= long_instr_if;
-                  fetch_second_half <= 1'b0;
-                  if_pending <= 1'b0;
-                  PC_if <= long_instr_if ? PCplus4_if : PCplus2_if;
-               end
-            end else if (ex_fire & id_valid) begin
-               if (!instr_ready) begin
-                  id_valid <= 1'b0;
-               end
+            if (do_issue) begin
+               id_valid <= 1'b1;
+               id_instr <= decompressed[31:2];
+               id_pc    <= PC_if;
+               id_long  <= long_instr_if;
+               PC_if    <= long_instr_if ? PCplus4_if : PCplus2_if;
+            end else if (ex_fire) begin
+               id_valid <= 1'b0;      // EX se lleva la instruccion y no hay otra
             end
          end
       end
@@ -762,6 +778,10 @@ module FemtoRV32_PetitPipe_WB #(
    // ack pertenece a la transaccion que estaba en el bus, no a esta. Sin
    // esto, dos accesos a datos en ciclos CONSECUTIVOS hacen que el segundo
    // termine al instante y con el dato del primero.
+   //
+   // El fallo estaba dormido porque la etapa de busqueda antigua siempre
+   // metia un hueco entre dos accesos a datos. Con la cola de instrucciones
+   // los accesos se pegan, y test_load_store lo caza (error 3).
    wire dwb_first   = dwb_new_req & ~dwb_pending;
    wire dwb_waiting = dwb_active & ~(dwb_ack_i & ~dwb_first);
    wire dwb_we_comb = dwb_pending ? dwb_we_pending : dwb_new_we;
