@@ -299,6 +299,13 @@ module FemtoRV32_Core_P2(
 
    wire [31:0] aluOut = isALUreg & funcM ? aluOut_muldiv : aluOut_base;
 
+   // NeoVCS: predicado de salto REGISTRADO. El camino critico medido era
+   // registros -> mux -> restador -> ex_flush -> PC_new, todo en un ciclo. El
+   // restador es barato (1,59 ns los 28 bits de acarreo); lo caro es lo que
+   // viene detras. Cortando aqui, el salto se resuelve un ciclo mas tarde.
+   // MEDIDO en P&R: 64,685 -> 73,778 MHz, un +9,6 %.
+   reg  predicate_r;
+   reg  brDone;
    wire predicate =
         funct3Is[0] &  EQ  |
         funct3Is[1] & !EQ  |
@@ -396,14 +403,15 @@ module FemtoRV32_Core_P2(
    wire [31:0] PCinc = id_long ? (id_pc + 4) : (id_pc + 2);
    wire [31:0] PC_new =
            isJALR           ? {aluPlus[31:1],1'b0} :
-           (isJAL | (isBranch & predicate)) ? PCplusImm :
+           (isJAL | (isBranch & predicate_r)) ? PCplusImm :
            interrupt_return ? mepc :
                               PCinc;
 
    wire ex_valid = id_valid;
    wire ex_stall = ex_valid & ( ((isLoad | isStore) & (d_rbusy | d_wbusy)) |
                                 (isDivide & aluBusy) |
-                                (isMultiply & ~mulDone) );
+                                (isMultiply & ~mulDone) |
+                                (isBranch   & ~brDone)  );
    wire ex_fire = ex_valid & ~ex_stall;
 
    assign d_addr  = loadstore_addr;
@@ -425,7 +433,7 @@ module FemtoRV32_Core_P2(
 
    wire writeBack_en = ex_fire & ~(isBranch | isStore);
 
-   wire ex_flush = ex_fire & (interrupt | isJAL | isJALR | (isBranch & predicate) | interrupt_return);
+   wire ex_flush = ex_fire & (interrupt | isJAL | isJALR | (isBranch & predicate_r) | interrupt_return);
 
    always @(posedge clk) begin
       if (!reset_n) begin
@@ -450,11 +458,15 @@ module FemtoRV32_Core_P2(
          divResult <= 0;
          multiply <= 0;
          mulDone <= 1'b0;
+         predicate_r <= 1'b0;
+         brDone <= 1'b0;
       end else begin
          // El producto se captura en el primer ciclo y la instruccion
          // completa en el segundo.
          multiply <= multiply_c;
          mulDone  <= isMultiply & ex_valid & ~mulDone;
+         predicate_r <= predicate;
+         brDone      <= isBranch & ex_valid & ~brDone;
          // Track interrupt requests
          interrupt_request_sticky <= any_irq | (interrupt_request_sticky & ~interrupt);
 
