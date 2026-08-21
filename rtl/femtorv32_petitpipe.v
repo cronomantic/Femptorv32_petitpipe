@@ -758,7 +758,12 @@ module FemtoRV32_PetitPipe_WB #(
    wire [3:0] dwb_new_sel = dwb_new_we ? d_wmask : 4'b1111;
 
    wire dwb_active  = dwb_pending | dwb_new_req;
-   wire dwb_waiting = dwb_active & ~dwb_ack_i;
+   // Una transaccion NUEVA no puede consumir el ack del ciclo anterior: ese
+   // ack pertenece a la transaccion que estaba en el bus, no a esta. Sin
+   // esto, dos accesos a datos en ciclos CONSECUTIVOS hacen que el segundo
+   // termine al instante y con el dato del primero.
+   wire dwb_first   = dwb_new_req & ~dwb_pending;
+   wire dwb_waiting = dwb_active & ~(dwb_ack_i & ~dwb_first);
    wire dwb_we_comb = dwb_pending ? dwb_we_pending : dwb_new_we;
 
    assign dwb_adr_o = dwb_pending ? dwb_adr_pending : d_addr;
@@ -805,7 +810,7 @@ module FemtoRV32_PetitPipe_WB #(
 
          if (!dwb_pending) begin
             if (dwb_new_req) begin
-               dwb_pending     <= ~dwb_ack_i;
+               dwb_pending     <= 1'b1;   // el ack de este ciclo no es nuestro
                dwb_we_pending  <= dwb_new_we;
                dwb_adr_pending <= d_addr;
                dwb_dat_pending <= d_wdata;
