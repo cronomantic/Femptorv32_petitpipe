@@ -115,7 +115,18 @@ module FemtoRV32_Core_P2 #(
    //       ciclo ANTERIOR, y no hay handshake. Es lo que da una BSRAM
    //       registrada, y permite cortar el camino memoria->nucleo, que es
    //       donde se cae la frecuencia.
-   parameter integer FETCH_LAT  = 0
+   parameter integer FETCH_LAT  = 0,
+
+   // Latencia FIJA del bus de dato, en ciclos:
+   //   0 = handshake por d_rbusy/d_wbusy.
+   //   1 = FIJA: todo acceso a dato dura dos ciclos y el nucleo lo sabe, asi
+   //       que d_rbusy/d_wbusy no se miran.
+   //
+   // Por que existe: con handshake, la senal de ocupado sale del nucleo, cruza
+   // el SoC y VUELVE a entrar en la logica de parada, todo combinacional en el
+   // mismo ciclo. MEDIDO, ese viaje de ida y vuelta eran 4 de los 18,7 ns del
+   // peor camino del diseno. Si la latencia es fija no hace falta preguntar.
+   parameter integer DATA_LAT   = 0
 ) (
    input          clk,
 
@@ -500,7 +511,14 @@ module FemtoRV32_Core_P2 #(
                               PCinc;
 
    wire ex_valid = id_valid;
-   wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & (d_rbusy | d_wbusy)) |
+
+   // Acceso a dato: con DATA_LAT=1 la parada la genera el propio nucleo -un
+   // ciclo, siempre- en vez de esperar una senal que viene de fuera.
+   wire dat_acc   = ex_valid & (isLoad | isStore | isAMO);
+   reg  dat_seen;
+   wire dat_busy  = (DATA_LAT == 0) ? (d_rbusy | d_wbusy) : ~dat_seen;
+
+   wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & dat_busy) |
                                 (isDivide & aluBusy) |
                                 (isMultiply & ~mulDone) |
                                 (isBranch   & ~brDone)  );
@@ -538,6 +556,7 @@ module FemtoRV32_Core_P2 #(
    always @(posedge clk) begin
       if (!reset_n) begin
          PC_if <= reset_pc;
+         dat_seen <= 1'b0;
          q0 <= 32'd0; q1 <= 32'd0;
          v0 <= 1'b0;  v1 <= 1'b0;
          pend <= 1'b0;
@@ -610,6 +629,11 @@ module FemtoRV32_Core_P2 #(
          end else if (ex_fire & interrupt_return) begin
             mcause <= 32'b0;
          end
+
+         // Un acceso a dato dura dos ciclos con DATA_LAT=1: dat_seen marca que
+         // ya se paso el primero. No depende del vaciado porque un salto no
+         // puede coincidir con un acceso a dato a medias.
+         dat_seen <= dat_acc & ~dat_seen;
 
          // Flush pipeline on control transfer
          if (ex_flush) begin
