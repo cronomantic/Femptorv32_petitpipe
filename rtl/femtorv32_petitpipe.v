@@ -272,7 +272,15 @@ module FemtoRV32_Core_P2(
 
    wire signed [32:0] signed1 = {sign1, aluIn1};
    wire signed [32:0] signed2 = {sign2, aluIn2};
-   wire signed [63:0] multiply = signed1 * signed2;
+   // NeoVCS: multiplicador SEGMENTADO. El producto de 33x33 con signo era el
+   // camino critico medido: no cabe en un MULT27X36, y Gowin lo repartia entre
+   // DSP y sumadores de fabric, todo combinacional. Registrandolo, MUL pasa a
+   // costar 2 ciclos y el cuello vuelve a la cadena de acarreo del ALU.
+   // MEDIDO en P&R con dos nucleos y memoria compartida: 60,715 -> 63,729 MHz.
+   wire signed [63:0] multiply_c = signed1 * signed2;
+   reg  signed [63:0] multiply;
+   wire isMultiply = isALUreg & funcM & ~instr[14];
+   reg  mulDone;
 
    wire [31:0] aluOut_base =
      (funct3Is[0]  ? instr[30] & instr[5] ? aluMinus[31:0] : aluPlus : 32'b0) |
@@ -394,7 +402,8 @@ module FemtoRV32_Core_P2(
 
    wire ex_valid = id_valid;
    wire ex_stall = ex_valid & ( ((isLoad | isStore) & (d_rbusy | d_wbusy)) |
-                                (isDivide & aluBusy) );
+                                (isDivide & aluBusy) |
+                                (isMultiply & ~mulDone) );
    wire ex_fire = ex_valid & ~ex_stall;
 
    assign d_addr  = loadstore_addr;
@@ -439,7 +448,13 @@ module FemtoRV32_Core_P2(
          quotient <= 0;
          quotient_msk <= 0;
          divResult <= 0;
+         multiply <= 0;
+         mulDone <= 1'b0;
       end else begin
+         // El producto se captura en el primer ciclo y la instruccion
+         // completa en el segundo.
+         multiply <= multiply_c;
+         mulDone  <= isMultiply & ex_valid & ~mulDone;
          // Track interrupt requests
          interrupt_request_sticky <= any_irq | (interrupt_request_sticky & ~interrupt);
 
