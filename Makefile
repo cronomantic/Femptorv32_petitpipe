@@ -45,6 +45,13 @@ LINK_SCRIPT := $(COMMON_DIR)/link.ld
 TESTS_SRC  := $(wildcard $(TEST_DIR)/rv32i/*.S)
 TESTS_NAME := $(notdir $(TESTS_SRC:.S=))
 
+# Tests de extensiones que SOLO tiene petitpipe. No pueden ir en rv32i/ porque
+# la suite corre todos los tests en los tres nucleos, y gracilis y pipedream
+# fallarian por no implementar la extension -que es correcto, pero rompe la
+# suite-. Estos se compilan y corren unicamente contra petitpipe.
+PP_TESTS_SRC  := $(wildcard $(TEST_DIR)/petitpipe/*.S)
+PP_TESTS_NAME := $(notdir $(PP_TESTS_SRC:.S=))
+
 ELFS    := $(patsubst %, $(BUILD_DIR)/elfs/%.elf,   $(TESTS_NAME))
 HEXES   := $(patsubst %, $(BUILD_DIR)/hexes/%.hex,  $(TESTS_NAME))
 DISASMS := $(patsubst %, $(BUILD_DIR)/disasm/%.dis, $(TESTS_NAME))
@@ -79,6 +86,10 @@ all: help
 
 # Compile assembly tests → ELF
 # ---------------------------------------------------------------------------
+$(BUILD_DIR)/elfs/%.elf: $(TEST_DIR)/petitpipe/%.S $(LINK_SCRIPT) $(COMMON_DIR)/test_macros.h
+	@mkdir -p $(BUILD_DIR)/elfs
+	$(CC) $(CFLAGS) -I$(COMMON_DIR) -T$(LINK_SCRIPT) -o $@ $<
+
 $(BUILD_DIR)/elfs/%.elf: $(TEST_DIR)/rv32i/%.S $(LINK_SCRIPT) $(COMMON_DIR)/test_macros.h
 	@mkdir -p $(BUILD_DIR)/elfs
 	$(CC) $(CFLAGS) -I$(COMMON_DIR) -T$(LINK_SCRIPT) -o $@ $<
@@ -363,7 +374,7 @@ sim-%: $(BUILD_DIR)/hexes/%.hex $(SIM_EXE)
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
-RESULTS := $(patsubst %, $(BUILD_DIR)/results/%.log, $(TESTS_NAME))
+RESULTS := $(patsubst %, $(BUILD_DIR)/results/%.log, $(TESTS_NAME) $(PP_TESTS_NAME))
 
 .PHONY: sim
 sim: $(RESULTS) $(GRACILIS_RESULTS) $(PIPEDREAM_RESULTS)

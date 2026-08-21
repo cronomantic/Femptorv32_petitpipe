@@ -123,6 +123,13 @@ module FemtoRV32_Core_P2 #(
    output  [3:0] d_wmask,
    output        d_rstrb,
    input  [31:0] d_rdata,
+
+   // Zalrsc: la reserva vive en el nucleo, pero quien sabe si OTRO maestro ha
+   // escrito la direccion reservada es el sistema. El nucleo la publica y el
+   // SoC la mata; asi la comparacion de snoop no entra en el camino del nucleo.
+   output [31:0] res_addr_o,
+   output        res_valid_o,
+   input         res_kill,
    input         d_rbusy,
    input         d_wbusy,
 
@@ -202,6 +209,12 @@ module FemtoRV32_Core_P2 #(
    wire isJALR    =  (instr[6:2] == 5'b11001);
    wire isJAL     =  (instr[6:2] == 5'b11011);
    wire isSYSTEM  =  (instr[6:2] == 5'b11100);
+   // Zalrsc: opcode AMO. Solo lr.w (funct5 00010) y sc.w (00011); los nueve
+   // AMO de Zaamo NO estan, y no hacen falta: GCC sintetiza fetch_add,
+   // exchange y compare_exchange a partir de lr/sc, sin llamadas a libreria.
+   wire isAMO     =  (instr[6:2] == 5'b01011) & (instr[14:12] == 3'b010);
+   wire isLR      =  isAMO & (instr[31:27] == 5'b00010);
+   wire isSC      =  isAMO & (instr[31:27] == 5'b00011);
 
    wire isALU = isALUimm | isALUreg;
 
@@ -324,8 +337,10 @@ module FemtoRV32_Core_P2 #(
                                                instr[4] ? Uimm[31:0] :
                                                           Bimm[31:0] );
 
+   // Los AMO direccionan con rs1 A SECAS: no hay inmediato. Sin este caso se
+   // usaria Simm, que en un AMO son campos de funct5/rl/aq y da basura.
    wire [31:0] loadstore_addr = rs1[31:0] +
-                   (instr[5] ? Simm[31:0] : Iimm[31:0]);
+                   (isAMO ? 32'b0 : instr[5] ? Simm[31:0] : Iimm[31:0]);
 
    wire mem_byteAccess     = instr[13:12] == 2'b00;
    wire mem_halfwordAccess = instr[13:12] == 2'b01;
@@ -354,6 +369,16 @@ module FemtoRV32_Core_P2 #(
               mem_halfwordAccess ?
                     (loadstore_addr[1] ? 4'b1100 : 4'b0011) :
               4'b1111;
+
+   // --- Zalrsc: conjunto de reserva ----------------------------------------
+   // Una sola reserva por hart. sc.w exige que siga viva y que la direccion
+   // coincida. La ISA permite fallos espurios de sc, asi que invalidar de mas
+   // es legal: eso deja el snoop fuera del camino critico del nucleo.
+   reg  [31:0] res_addr;
+   reg         res_valid;
+   assign res_addr_o  = res_addr;
+   assign res_valid_o = res_valid;
+   wire sc_ok = res_valid & (res_addr == loadstore_addr);
 
    // CSR/interrupts
    reg  [31:0] mepc;
@@ -416,7 +441,7 @@ module FemtoRV32_Core_P2 #(
                               PCinc;
 
    wire ex_valid = id_valid;
-   wire ex_stall = ex_valid & ( ((isLoad | isStore) & (d_rbusy | d_wbusy)) |
+   wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & (d_rbusy | d_wbusy)) |
                                 (isDivide & aluBusy) |
                                 (isMultiply & ~mulDone) |
                                 (isBranch   & ~brDone)  );
@@ -428,8 +453,14 @@ module FemtoRV32_Core_P2 #(
    assign d_wdata[23:16] = loadstore_addr[1] ? rs2[7:0]  : rs2[23:16];
    assign d_wdata[31:24] = loadstore_addr[0] ? rs2[7:0]  :
                            loadstore_addr[1] ? rs2[15:8] : rs2[31:24];
-   assign d_wmask = ex_valid & isStore ? STORE_wmask : 4'b0;
-   assign d_rstrb = ex_valid & isLoad;
+   // sc.w escribe SOLO si la reserva sigue viva; si no, no toca la memoria y
+   // devuelve 1. lr.w lee como un lw de palabra.
+   // OJO: aqui `ex_valid & (...)` seria un AND BIT A BIT contra un valor de 4
+   // bits, y solo sobreviviria el bit 0 de la mascara. Tiene que ser condicion.
+   assign d_wmask = !ex_valid       ? 4'b0        :
+                    isStore         ? STORE_wmask :
+                    (isSC & sc_ok)  ? 4'b1111     : 4'b0;
+   assign d_rstrb = ex_valid & (isLoad | isLR);
 
    wire [31:0] writeBackData  =
       (isSYSTEM            ? CSR_read  : 32'b0) |
@@ -437,7 +468,9 @@ module FemtoRV32_Core_P2 #(
       (isALU               ? aluOut    : 32'b0) |
       (isAUIPC             ? PCplusImm : 32'b0) |
       (isJALR   | isJAL    ? PCinc     : 32'b0) |
-      (isLoad              ? LOAD_data : 32'b0);
+      (isLoad              ? LOAD_data : 32'b0) |
+      (isLR                ? d_rdata   : 32'b0) |
+      (isSC                ? {31'b0, ~sc_ok} : 32'b0);
 
    wire writeBack_en = ex_fire & ~(isBranch | isStore);
 
@@ -468,7 +501,15 @@ module FemtoRV32_Core_P2 #(
          mulDone <= 1'b0;
          predicate_r <= 1'b0;
          brDone <= 1'b0;
+         res_addr <= 32'b0;
+         res_valid <= 1'b0;
       end else begin
+         // Zalrsc. lr.w toma la reserva; sc.w la suelta pase lo que pase, que
+         // es lo que impide que dos sc seguidos triunfen los dos. res_kill la
+         // mata cuando otro maestro escribe la direccion reservada.
+         if (res_kill) res_valid <= 1'b0;
+         if (ex_fire & isLR) begin res_addr <= loadstore_addr; res_valid <= 1'b1; end
+         else if (ex_fire & isSC) res_valid <= 1'b0;
          // El producto se captura en el primer ciclo y la instruccion
          // completa en el segundo.
          multiply <= multiply_c;
@@ -579,6 +620,11 @@ module FemtoRV32_PetitPipe_WB #(
 )(
    input          clk,
 
+   // Zalrsc: reserva publicada y matada desde fuera (ver el nucleo)
+   output [31:0] res_addr_o,
+   output        res_valid_o,
+   input         res_kill,
+
    // Instruction wishbone (pipelined)
    output [31:0] iwb_adr_o,
    output [31:0] iwb_dat_o,
@@ -643,6 +689,9 @@ module FemtoRV32_PetitPipe_WB #(
       .d_rbusy(d_rbusy),
       .d_wbusy(d_wbusy),
       .irq_i(irq_i),
+      .res_addr_o(res_addr_o),
+      .res_valid_o(res_valid_o),
+      .res_kill(res_kill),
       .reset_n(reset_n)
    );
 
