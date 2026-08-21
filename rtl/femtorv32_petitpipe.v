@@ -106,7 +106,16 @@ module FemtoRV32_Core_P2 #(
    // deja a 0 y nada cambia; con varios, cada instancia lleva el suyo y el
    // software los distingue leyendolo. RISC-V exige que al menos un hart
    // tenga mhartid = 0.
-   parameter [31:0] HARTID     = 32'd0
+   parameter [31:0] HARTID     = 32'd0,
+
+   // Latencia FIJA del bus de instruccion, en ciclos:
+   //   0 = el dato de i_addr esta en i_rdata el MISMO ciclo (handshake por
+   //       i_rbusy, que es como habla el envoltorio Wishbone).
+   //   1 = SEGMENTADA: i_rdata lleva el dato de la direccion presentada el
+   //       ciclo ANTERIOR, y no hay handshake. Es lo que da una BSRAM
+   //       registrada, y permite cortar el camino memoria->nucleo, que es
+   //       donde se cae la frecuencia.
+   parameter integer FETCH_LAT  = 0
 ) (
    input          clk,
 
@@ -198,11 +207,25 @@ module FemtoRV32_Core_P2 #(
    wire do_issue = can_issue & (~id_valid | ex_fire);
    // Al avanzar, el PC cambia de palabra salvo que sea una corta en mitad par
    wire shift    = do_issue & (PC_if[1] | long_instr_if);
-   // Hay hueco si alguna ranura esta libre, o va a quedarlo por el desplazamiento
-   wire room     = ~v0 | ~v1 | shift;
+   // Ranuras ocupadas DESPUES del desplazamiento
+   wire s0 = shift ? v1   : v0;
+   wire s1 = shift ? 1'b0 : v1;
+
+   // pend: se pidio en el ciclo anterior, o sea que el dato llega AHORA.
+   // Solo existe con FETCH_LAT=1; con 0 se queda a cero y no cuesta nada.
+   reg pend;
+
+   // Con latencia 1 hay que reservar sitio para la palabra que ya viene en
+   // vuelo: se pide mientras lo que hay mas lo que viene no llene las dos
+   // ranuras. Con latencia 0 basta con que quede una libre.
+   wire [1:0] futuro = {1'b0, s0} + {1'b0, s1} + {1'b0, pend};
+   wire room     = (FETCH_LAT == 0) ? (~v0 | ~v1 | shift) : (futuro < 2'd2);
    assign i_rstrb = room;
-   // La memoria entrega en el mismo ciclo salvo que pida espera
-   wire fill     = room & ~i_rbusy;
+
+   // La peticion se acepta si la memoria no pide espera. Con latencia 1 el
+   // relleno NO es de esta peticion sino de la del ciclo anterior.
+   wire acepta   = room & ~i_rbusy;
+   wire fill     = (FETCH_LAT == 0) ? acepta : pend;
 
    // Estado siguiente: primero el desplazamiento, despues el relleno en la
    // primera ranura libre. En un ciclo pueden ocurrir las dos cosas.
@@ -517,6 +540,7 @@ module FemtoRV32_Core_P2 #(
          PC_if <= reset_pc;
          q0 <= 32'd0; q1 <= 32'd0;
          v0 <= 1'b0;  v1 <= 1'b0;
+         pend <= 1'b0;
          fpc <= {reset_pc[31:2], 2'b00};
          id_valid <= 1'b0;
          id_instr <= 30'b0;
@@ -594,10 +618,15 @@ module FemtoRV32_Core_P2 #(
             PC_if <= interrupt ? mtvec : PC_new;
             fpc   <= {(interrupt ? mtvec[31:2] : PC_new[31:2]), 2'b00};
             v0 <= 1'b0; v1 <= 1'b0;
+            // la palabra en vuelo es de la ruta no tomada: se descarta
+            pend <= 1'b0;
             id_valid <= 1'b0;
          end else begin
             q0 <= n_q0; q1 <= n_q1; v0 <= n_v0; v1 <= n_v1;
-            if (fill) fpc <= fpc + 4;
+            // fpc avanza cuando la peticion se EMITE. Con latencia 0 emitir y
+            // recibir son el mismo ciclo, asi que las dos formas coinciden.
+            if (acepta) fpc <= fpc + 4;
+            pend <= (FETCH_LAT == 0) ? 1'b0 : acepta;
 
             if (do_issue) begin
                id_valid <= 1'b1;
