@@ -126,7 +126,24 @@ module FemtoRV32_Core_P2 #(
    // el SoC y VUELVE a entrar en la logica de parada, todo combinacional en el
    // mismo ciclo. MEDIDO, ese viaje de ida y vuelta eran 4 de los 18,7 ns del
    // peor camino del diseno. Si la latencia es fija no hace falta preguntar.
-   parameter integer DATA_LAT   = 0
+   parameter integer DATA_LAT   = 0,
+
+   // REGION LENTA: los dos bits altos que la identifican, y un bit que la
+   // activa. Sirve para que la comparacion "esta direccion es lenta?" se haga
+   // AQUI DENTRO y no en el SoC.
+   //
+   // POR QUE. i_addr sale de fpc, que es un registro limpio; pero si el SoC
+   // compara la region y devuelve i_rbusy, esa senal entra en `acepta`, que
+   // controla si fpc se actualiza: el lazo SALE del nucleo, cruza el SoC y
+   // VUELVE al registro de donde salio. MEDIDO sobre soc5: con ese lazo el SoC
+   // baja de 67,5 a 60,9 MHz de media y la dispersion sube al 20,2 %;
+   // rompiendolo, 67,48 con 1,1 %.
+   //
+   // Con esto el SoC ya no mira la direccion para calcular i_rbusy: solo dice
+   // si la memoria lenta esta ocupada -- una senal REGISTRADA, sin dependencia
+   // de fpc. NO se anade ningun puerto: se cualifica el que ya habia.
+   parameter        SLOW_EN   = 1'b0,
+   parameter  [1:0] SLOW_TAG  = 2'b01
 ) (
    input          clk,
 
@@ -235,7 +252,16 @@ module FemtoRV32_Core_P2 #(
 
    // La peticion se acepta si la memoria no pide espera. Con latencia 1 el
    // relleno NO es de esta peticion sino de la del ciclo anterior.
-   wire acepta   = room & ~i_rbusy;
+   // La comparacion vive AQUI, junto a fpc, asi que el lazo
+   // fpc -> compara -> acepta -> fpc se queda DENTRO del nucleo.
+   //
+   // NO hace falta un puerto nuevo: i_rbusy ya existe para esto. Lo unico que
+   // cambia es que se CUALIFICA con la region, de modo que el SoC puede
+   // conducirlo desde un REGISTRO -- "la memoria lenta esta ocupada" -- en vez
+   // de calcularlo a partir de i_addr. Con SLOW_EN=0 se reduce a lo de antes.
+   wire i_slow      = SLOW_EN & (fpc[31:30] == SLOW_TAG);
+   wire i_rbusy_eff = SLOW_EN ? (i_slow & i_rbusy) : i_rbusy;
+   wire acepta      = room & ~i_rbusy_eff;
    wire fill     = (FETCH_LAT == 0) ? acepta : pend;
 
    // Estado siguiente: primero el desplazamiento, despues el relleno en la
