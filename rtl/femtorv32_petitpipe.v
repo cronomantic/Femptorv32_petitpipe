@@ -560,7 +560,12 @@ module FemtoRV32_Core_P2 #(
    wire d_slow    = DSLOW_EN & (|loadstore_addr[31:30]);
    wire d_hs      = DSLOW_EN ? ((d_rbusy | d_wbusy) & d_slow)
                              :  (d_rbusy | d_wbusy);
-   wire dat_busy  = (DATA_LAT == 0) ? d_hs : ~dat_seen;
+   // Con DATA_LAT=1 el primer ciclo lo impone el nucleo SIEMPRE -es la
+   // latencia 1 de su BSRAM privada- y ADEMAS espera el handshake si la region
+   // es lenta. Antes eran excluyentes, y un SoC que queria las dos cosas tenia
+   // que elegir: con DATA_LAT=0 la privada se leia en UN ciclo con el dato del
+   // acceso anterior. Lo cazo rtl/tb/tbext.v.
+   wire dat_busy  = (DATA_LAT == 0) ? d_hs : (~dat_seen | d_hs);
 
    wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & dat_busy) |
                                 (isDivide & aluBusy) |
@@ -677,7 +682,11 @@ module FemtoRV32_Core_P2 #(
          // Un acceso a dato dura dos ciclos con DATA_LAT=1: dat_seen marca que
          // ya se paso el primero. No depende del vaciado porque un salto no
          // puede coincidir con un acceso a dato a medias.
-         dat_seen <= dat_acc & ~dat_seen;
+         // Y se QUEDA puesto hasta que el acceso dispara: si la region lenta
+         // hace esperar, un dat_seen que alternara cada ciclo solo dejaria
+         // disparar en los ciclos impares, y con un ok de un solo ciclo se
+         // quedaria esperando para siempre.
+         dat_seen <= dat_acc & ~ex_fire;
 
          // Flush pipeline on control transfer
          if (ex_flush) begin
