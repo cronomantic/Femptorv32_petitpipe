@@ -190,6 +190,13 @@ module FemtoRV32_Core_P2 #(
 
    input   [7:0] irq_i,
 
+   // Parada externa, REGISTRADA fuera: retiene la emision -la instruccion que
+   // hay en EX no dispara, y con ella tampoco entra una interrupcion- hasta que
+   // baja. Es lo que WAIT, CARTDMA y la depuracion necesitan, y no es un
+   // handshake: no sale nada del nucleo hacia quien la pone. El contador de
+   // ciclos se para con ella, como en el emulador (ciclos ejecutados).
+   input         halt_i,
+
    input         reset_n      // synchronous reset, active low
 );
 
@@ -496,7 +503,7 @@ module FemtoRV32_Core_P2 #(
    reg  [31:0]            mcause;
    reg  [63:0]            cycles;
 
-   always @(posedge clk) cycles <= cycles + 1;
+   always @(posedge clk) if (!halt_i) cycles <= cycles + 1;
 
    wire sel_mstatus = (instr[31:20] == 12'h300);
    wire sel_mtvec   = (instr[31:20] == 12'h305);
@@ -567,7 +574,8 @@ module FemtoRV32_Core_P2 #(
    // acceso anterior. Lo cazo rtl/tb/tbext.v.
    wire dat_busy  = (DATA_LAT == 0) ? d_hs : (~dat_seen | d_hs);
 
-   wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & dat_busy) |
+   wire ex_stall = ex_valid & ( halt_i |
+                                ((isLoad | isStore | isAMO) & dat_busy) |
                                 (isDivide & aluBusy) |
                                 (isMultiply & ~mulDone) |
                                 (isBranch   & ~brDone)  );
@@ -818,6 +826,7 @@ module FemtoRV32_PetitPipe_WB #(
       .d_rbusy(d_rbusy),
       .d_wbusy(d_wbusy),
       .irq_i(irq_i),
+      .halt_i(1'b0),
       .res_addr_o(res_addr_o),
       .res_valid_o(res_valid_o),
       .res_kill(res_kill),
