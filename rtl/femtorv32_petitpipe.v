@@ -143,7 +143,20 @@ module FemtoRV32_Core_P2 #(
    // si la memoria lenta esta ocupada -- una senal REGISTRADA, sin dependencia
    // de fpc. NO se anade ningun puerto: se cualifica el que ya habia.
    parameter        SLOW_EN   = 1'b0,
-   parameter  [1:0] SLOW_TAG  = 2'b01
+   parameter  [1:0] SLOW_TAG  = 2'b01,
+
+   // Lo mismo para el bus de DATO, y ahi el lazo es PEOR: d_addr no es un
+   // registro, es la salida del sumador rs1+imm. Sin esto el camino era
+   //   sumador -> sale del nucleo -> compara region -> d_rbusy -> dat_busy
+   //   -> ex_stall -> gobierna el cauce
+   // MEDIDO sobre soc5: es el que se lleva casi todo el coste. Arreglar solo
+   // el lado de busqueda no movio la media (61,757 -> 61,697).
+   //
+   // Aqui "lenta" es cualquier region que no sea la 00 -la privada del nucleo-,
+   // porque tanto la SRAM externa como la BSRAM compartida en ranura fija
+   // pueden hacer esperar. El SoC solo tiene que decir, DESDE UN REGISTRO, si
+   // el acceso lento ya esta servido.
+   parameter        DSLOW_EN  = 1'b0
 ) (
    input          clk,
 
@@ -542,7 +555,12 @@ module FemtoRV32_Core_P2 #(
    // ciclo, siempre- en vez de esperar una senal que viene de fuera.
    wire dat_acc   = ex_valid & (isLoad | isStore | isAMO);
    reg  dat_seen;
-   wire dat_busy  = (DATA_LAT == 0) ? (d_rbusy | d_wbusy) : ~dat_seen;
+   // La comparacion vive AQUI, junto al sumador, asi que el lazo se queda
+   // dentro del nucleo. Con DSLOW_EN=0 se reduce a lo de antes.
+   wire d_slow    = DSLOW_EN & (|loadstore_addr[31:30]);
+   wire d_hs      = DSLOW_EN ? ((d_rbusy | d_wbusy) & d_slow)
+                             :  (d_rbusy | d_wbusy);
+   wire dat_busy  = (DATA_LAT == 0) ? d_hs : ~dat_seen;
 
    wire ex_stall = ex_valid & ( ((isLoad | isStore | isAMO) & dat_busy) |
                                 (isDivide & aluBusy) |
